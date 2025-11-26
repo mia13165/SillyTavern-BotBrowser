@@ -4,7 +4,7 @@ import { eventSource, event_types, saveSettingsDebounced, processDroppedFiles, g
 // Import modules
 import { loadImportStats, saveImportStats, loadRecentlyViewed } from './modules/storage/storage.js';
 import { getTimeAgo } from './modules/storage/stats.js';
-import { loadServiceIndex, initializeServiceCache } from './modules/services/cache.js';
+import { loadServiceIndex, initializeServiceCache, clearQuillgenCache } from './modules/services/cache.js';
 import { getRandomCard } from './modules/services/cards.js';
 import { importCardToSillyTavern } from './modules/services/import.js';
 import { showCardDetail, closeDetailModal, showImageLightbox } from './modules/modals/detail.js';
@@ -47,7 +47,8 @@ const defaultSettings = {
     blurNsfw: false,
     hideNsfw: false,
     trackStats: true,
-    tagBlocklist: []
+    tagBlocklist: [],
+    quillgenApiKey: ''
 };
 
 // Stats storage
@@ -544,6 +545,22 @@ function showSettingsModal() {
                     <small style="color: rgba(255,255,255,0.6); display: block; margin-top: 5px;">Cards with these tags or terms in their name/description will be hidden. Enter one term per line (case-insensitive).</small>
                 </div>
             </div>
+
+            <div class="bot-browser-settings-section">
+                <h3><i class="fa-solid fa-feather-pointed"></i> QuillGen</h3>
+                <small style="color: rgba(255,255,255,0.6); display: block; margin-bottom: 15px;">
+                    Browse public characters from QuillGen. Add your API key to also see your own characters.
+                    <a href="https://quillgen.app" target="_blank" style="color: rgba(100, 150, 255, 0.9);">Get your API key →</a>
+                </small>
+
+                <div class="bot-browser-setting-group">
+                    <label for="bb-setting-quillgen-key">QuillGen API Key (optional):</label>
+                    <input type="password" id="bb-setting-quillgen-key" class="text_pole" 
+                           placeholder="sk_..." 
+                           value="${settings.quillgenApiKey || ''}"
+                           style="width: 100%; font-family: monospace;">
+                </div>
+            </div>
         </div>
 
         <div class="bot-browser-detail-actions">
@@ -655,6 +672,15 @@ function showSettingsModal() {
             .split('\n')
             .map(line => line.trim())
             .filter(line => line.length > 0);
+
+        // QuillGen settings
+        const oldApiKey = settings.quillgenApiKey;
+        settings.quillgenApiKey = document.getElementById('bb-setting-quillgen-key').value.trim();
+
+        // Clear QuillGen cache if settings changed
+        if (oldApiKey !== settings.quillgenApiKey) {
+            clearQuillgenCache();
+        }
 
         saveSettingsDebounced();
         applyBlurSetting();

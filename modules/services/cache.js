@@ -1,6 +1,8 @@
 import { default_avatar } from '../../../../../../script.js';
+import { extension_settings } from '../../../../../extensions.js';
 
 const baseUrl = 'https://raw.githubusercontent.com/mia13165/updated_cards/refs/heads/main';
+const QUILLGEN_API_URL = 'https://quillgen.app/v1/public/api/browse';
 
 // Storage for loaded data
 const loadedData = {
@@ -23,6 +25,11 @@ export async function loadMasterIndex() {
 }
 
 export async function loadServiceIndex(serviceName) {
+    // Handle QuillGen specially - it uses API-based loading
+    if (serviceName === 'quillgen') {
+        return loadQuillgenIndex();
+    }
+
     if (loadedData.serviceIndexes[serviceName]) {
         return loadedData.serviceIndexes[serviceName];
     }
@@ -57,6 +64,94 @@ export async function loadServiceIndex(serviceName) {
         loadedData.serviceIndexes[serviceName] = [];
         return [];
     }
+}
+
+/**
+ * Load characters from QuillGen API.
+ * Without API key: returns public characters only.
+ * With API key: returns public characters + user's own characters (marked with is_own).
+ */
+export async function loadQuillgenIndex() {
+    const settings = extension_settings?.['BotBrowser'] || {};
+    const apiKey = settings.quillgenApiKey;
+
+    // Return cached data if available
+    if (loadedData.serviceIndexes['quillgen'] && loadedData.serviceIndexes['quillgen'].length > 0) {
+        return loadedData.serviceIndexes['quillgen'];
+    }
+
+    try {
+        const headers = { 'Accept': 'application/json' };
+        if (apiKey) {
+            headers['Authorization'] = `Bearer ${apiKey}`;
+        }
+
+        const response = await fetch(`${QUILLGEN_API_URL}/characters?limit=500`, { headers });
+
+        if (response.status === 401) {
+            // Only show invalid key error if user actually provided a key
+            if (apiKey) {
+                console.error('[Bot Browser] QuillGen API key is invalid');
+                toastr.error('QuillGen API key is invalid. Check your settings.', 'Authentication Failed');
+            } else {
+                console.warn('[Bot Browser] QuillGen requires authentication for this request');
+            }
+            loadedData.serviceIndexes['quillgen'] = [];
+            return [];
+        }
+
+        if (!response.ok) {
+            console.error(`[Bot Browser] QuillGen API error: ${response.status}`);
+            toastr.error(`Failed to load QuillGen characters: ${response.statusText}`);
+            loadedData.serviceIndexes['quillgen'] = [];
+            return [];
+        }
+
+        const data = await response.json();
+        const cards = data.cards || [];
+
+        const appendApiKey = (url) => {
+            if (!apiKey || !url) return url;
+            const separator = url.includes('?') ? '&' : '?';
+            return `${url}${separator}key=${encodeURIComponent(apiKey)}`;
+        };
+
+        // Map QuillGen cards to BotBrowser format
+        const mappedCards = cards.map(card => ({
+            ...card,
+            avatar_url: appendApiKey(card.avatar_url),
+            image_url: appendApiKey(card.image_url),
+            service: 'quillgen',
+            chunk: null // QuillGen cards don't use chunks - they're fetched directly
+        }));
+
+        const ownCount = mappedCards.filter(c => c.is_own).length;
+        const publicCount = mappedCards.length - ownCount;
+        console.log(`[Bot Browser] Loaded ${mappedCards.length} cards from QuillGen (${publicCount} public, ${ownCount} own)`);
+
+        if (mappedCards.length === 0) {
+            const msg = apiKey 
+                ? 'No characters found. Create some on QuillGen.app!'
+                : 'No public characters available yet.';
+            toastr.info(msg, 'QuillGen');
+        }
+
+        loadedData.serviceIndexes['quillgen'] = mappedCards;
+
+        return mappedCards;
+    } catch (error) {
+        console.error('[Bot Browser] Error loading QuillGen index:', error);
+        toastr.error('Failed to connect to QuillGen');
+        loadedData.serviceIndexes['quillgen'] = [];
+        return [];
+    }
+}
+
+/**
+ * Clear QuillGen cache to force reload on next access.
+ */
+export function clearQuillgenCache() {
+    loadedData.serviceIndexes['quillgen'] = null;
 }
 
 export async function loadCardChunk(service, chunkFile) {

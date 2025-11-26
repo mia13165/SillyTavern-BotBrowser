@@ -33,5 +33,6 @@ Browse cards, click one to see details, hit import to SillyTavern if you want it
 - Nyai.me
 - Desuarchive
 - MLPchag
+- [QuillGen](https://quillgen.app) (via direct API)
 
 Data updates periodically from the repo. Tested briefly on Moonlit Echoes theme, and on mobile. If you find any issues, please report them.
