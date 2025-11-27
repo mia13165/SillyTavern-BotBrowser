@@ -110,8 +110,32 @@ async function importCharacter(card, extensionName, extension_settings, importSt
     let imageBlob;
     let use404Fallback = false;
 
+    // Handle QuillGen cards - use auth header if API key is configured
+    if (card.service === 'quillgen' || card.sourceService === 'quillgen') {
+        console.log('[Bot Browser] Detected QuillGen card');
+        const settings = extension_settings['BotBrowser'] || {};
+        const apiKey = settings.quillgenApiKey;
+
+        // Use the image_url which points to the card.png endpoint
+        const cardUrl = card.image_url;
+        console.log('[Bot Browser] Fetching QuillGen card from:', cardUrl);
+
+        const fetchOptions = {};
+        if (apiKey) {
+            fetchOptions.headers = { 'Authorization': `Bearer ${apiKey}` };
+        }
+
+        const imageResponse = await fetch(cardUrl, fetchOptions);
+
+        if (!imageResponse.ok) {
+            throw new Error(`Failed to fetch QuillGen card: ${imageResponse.statusText}`);
+        }
+
+        imageBlob = await imageResponse.blob();
+        console.log('[Bot Browser] ✓ Successfully fetched QuillGen card');
+    }
     // Check if this is a realm.risuai.net card - handle different formats
-    if (imageUrl.includes('realm.risuai.net')) {
+    else if (imageUrl.includes('realm.risuai.net')) {
         console.log('[Bot Browser] Detected realm.risuai.net URL');
         console.log('[Bot Browser] imageUrl:', imageUrl);
 
@@ -382,7 +406,7 @@ async function importRisuAICard(uuid, card, getRequestHeaders) {
             // Load JSZip if not already loaded
             if (typeof JSZip === 'undefined') {
                 console.log('[Bot Browser] Loading JSZip library...');
-                await import('../../../../../../lib/jszip.min.js');
+                await import('../../../../../lib/jszip.min.js');
             }
 
             // Extract card.json from ZIP

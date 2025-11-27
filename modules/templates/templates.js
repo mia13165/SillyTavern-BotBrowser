@@ -19,6 +19,7 @@ export function createCardHTML(card) {
 
     return `
         <div class="bot-browser-card-thumbnail" data-card-id="${card.id}" data-nsfw="${isNsfw}">
+            ${card.is_own ? '<div class="bot-browser-own-badge" title="Your character"><i class="fa-solid fa-user"></i></div>' : ''}
             <div class="bot-browser-card-image" style="background-image: url('${safeImageUrl}');">
                 ${!safeImageUrl ? '<i class="fa-solid fa-user"></i>' : ''}
             </div>
@@ -107,6 +108,10 @@ export function getOriginalMenuHTML(recentlyViewed) {
                 <button class="bot-browser-source" data-source="desuarchive">
                     <div class="bot-browser-source-icon" style="background-image: url('https://s2.vndb.org/ch/32/17032.jpg'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
                     <span>Desuarchive</span>
+                </button>
+                <button class="bot-browser-source" data-source="quillgen">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://quillgen.app/logo-dark.png'); background-size: 85%; background-position: center; background-repeat: no-repeat;"></div>
+                    <span>QuillGen.app</span>
                 </button>
             </div>
         </div>
