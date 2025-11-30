@@ -2364,6 +2364,36 @@ body #bot-browser-settings-modal,
     flex-wrap: wrap;
 }
 
+/* Mobile vertical scrolling for advanced filters */
+@media (max-width: 600px) {
+    .bot-browser-advanced-filters,
+    .bot-browser-advanced-filters-janny {
+        max-height: 300px;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        scrollbar-width: thin;
+        scrollbar-color: rgba(255, 255, 255, 0.3) transparent;
+        padding-right: 8px;
+    }
+
+    .bot-browser-advanced-filters::-webkit-scrollbar,
+    .bot-browser-advanced-filters-janny::-webkit-scrollbar {
+        width: 4px;
+    }
+
+    .bot-browser-advanced-filters::-webkit-scrollbar-track,
+    .bot-browser-advanced-filters-janny::-webkit-scrollbar-track {
+        background: rgba(255, 255, 255, 0.1);
+        border-radius: 2px;
+    }
+
+    .bot-browser-advanced-filters::-webkit-scrollbar-thumb,
+    .bot-browser-advanced-filters-janny::-webkit-scrollbar-thumb {
+        background: rgba(255, 255, 255, 0.3);
+        border-radius: 2px;
+    }
+}
+
 .bot-browser-filter-group.full-width {
     flex: 1 1 100%;
 }
