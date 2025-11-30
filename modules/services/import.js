@@ -11,7 +11,8 @@ export async function importCardToSillyTavern(card, extensionName, extension_set
 
     try {
         // Detect if this is a lorebook or a character
-        const isLorebook = card.service === 'chub' && card.id && card.id.includes('/lorebooks/');
+        // Check for isLorebook flag (live Chub) or URL pattern (archive)
+        const isLorebook = card.isLorebook || (card.service === 'chub' && card.id && card.id.includes('/lorebooks/'));
 
         if (isLorebook) {
             importStats = await importLorebook(card, extensionName, extension_settings, importStats, getRequestHeaders);
@@ -85,6 +86,30 @@ async function importLorebook(card, extensionName, extension_settings, importSta
 
 // Import character
 async function importCharacter(card, extensionName, extension_settings, importStats, processDroppedFiles, getRequestHeaders) {
+    // Handle live Chub cards - fetch full data from API first
+    if (card.isLiveChub && card.fullPath) {
+        console.log('[Bot Browser] Importing live Chub card:', card.fullPath);
+        try {
+            const { getChubCharacter, transformFullChubCharacter } = await import('./chubApi.js');
+            const fullData = await getChubCharacter(card.fullPath);
+            console.log('[Bot Browser] Fetched full Chub character data');
+
+            // Merge the full data into the card
+            if (fullData && fullData.node) {
+                const fullCharData = transformFullChubCharacter(fullData);
+                card = { ...card, ...fullCharData };
+            }
+        } catch (error) {
+            console.warn('[Bot Browser] Failed to fetch full Chub data, using preview data:', error.message);
+        }
+    }
+
+    // Handle JannyAI cards - avatar images don't have embedded character data
+    if (card.isJannyAI || card.service === 'jannyai' || card.sourceService === 'jannyai') {
+        console.log('[Bot Browser] Importing JannyAI card:', card.name);
+        return await importJannyAICard(card, extensionName, extension_settings, importStats, processDroppedFiles);
+    }
+
     // Determine which URL to use based on service
     let imageUrl;
 
@@ -93,7 +118,7 @@ async function importCharacter(card, extensionName, extension_settings, importSt
         imageUrl = card.image_url;
     }
     // For Chub cards and cards with Chub avatars, prioritize avatar_url
-    else if (card.service === 'chub' || card.sourceService === 'chub' ||
+    else if (card.service === 'chub' || card.sourceService === 'chub' || card.isLiveChub ||
              (card.avatar_url && (card.avatar_url.includes('charhub.io') || card.avatar_url.includes('characterhub.org') || card.avatar_url.includes('avatars.charhub.io')))) {
         imageUrl = card.avatar_url || card.image_url;
     }
@@ -302,6 +327,94 @@ async function importFromChunkData(card, extensionName, extension_settings, impo
 
     // Track import
     return trackImport(extensionName, extension_settings, importStats, fullCard, 'character');
+}
+
+// Import JannyAI card - avatar images don't have embedded character data
+async function importJannyAICard(card, extensionName, extension_settings, importStats, processDroppedFiles) {
+    console.log('[Bot Browser] Importing JannyAI card with embedded data');
+
+    // Convert to Character Card V2 format
+    const characterData = {
+        spec: 'chara_card_v2',
+        spec_version: '2.0',
+        data: {
+            name: card.name || '',
+            description: card.description || '',
+            personality: card.personality || '',
+            scenario: card.scenario || '',
+            first_mes: card.first_message || '',
+            mes_example: card.mes_example || card.example_messages || '',
+            creator_notes: card.website_description || card.creator_notes || '',
+            system_prompt: card.system_prompt || '',
+            post_history_instructions: card.post_history_instructions || '',
+            creator: card.creator || '',
+            character_version: card.character_version || '1.0',
+            tags: card.tags || [],
+            alternate_greetings: card.alternate_greetings || [],
+            extensions: {
+                talkativeness: '0.5',
+                fav: false,
+                world: '',
+                depth_prompt: {
+                    prompt: '',
+                    depth: 4
+                },
+                jannyai: card.extensions?.jannyai || {}
+            }
+        }
+    };
+
+    console.log('[Bot Browser] JannyAI V2 card data:', characterData);
+
+    // Get the avatar image
+    let imageBlob;
+    const imageUrl = card.avatar_url;
+
+    if (imageUrl) {
+        try {
+            // Try fetching directly first
+            let imageResponse = await fetch(imageUrl);
+
+            if (!imageResponse.ok) {
+                // Try with CORS proxy
+                console.log('[Bot Browser] Direct fetch failed, trying CORS proxy...');
+                const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(imageUrl)}`;
+                imageResponse = await fetch(proxyUrl);
+            }
+
+            if (imageResponse.ok) {
+                imageBlob = await imageResponse.blob();
+                console.log('[Bot Browser] ✓ Fetched JannyAI avatar image');
+            }
+        } catch (error) {
+            console.warn('[Bot Browser] Failed to fetch JannyAI avatar:', error);
+        }
+    }
+
+    // If no image available, use default avatar
+    if (!imageBlob) {
+        console.log('[Bot Browser] Using default avatar for JannyAI card');
+        const defaultAvatarResponse = await fetch(default_avatar);
+        imageBlob = await defaultAvatarResponse.blob();
+    }
+
+    // Encode character data as base64 to embed in PNG
+    const jsonString = JSON.stringify(characterData);
+    const base64Data = btoa(unescape(encodeURIComponent(jsonString)));
+
+    // Create PNG with embedded character data
+    const pngBlob = await createCharacterPNG(imageBlob, base64Data);
+    const fileName = card.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.png';
+    const file = new File([pngBlob], fileName, { type: 'image/png' });
+
+    // Import the character
+    await processDroppedFiles([file]);
+
+    toastr.success(`${card.name} imported successfully!`, '', { timeOut: 2000 });
+    console.log('[Bot Browser] JannyAI card imported successfully');
+
+    // Track import
+    return trackImport(extensionName, extension_settings, importStats, card, 'character');
 }
 
 // Import card as JSON (fallback when image fetch fails)

@@ -17,14 +17,16 @@ export function loadPersistentSearch(extensionName, extension_settings, serviceN
 }
 
 // Save search state to localStorage (per-service)
-export function savePersistentSearch(extensionName, extension_settings, serviceName, filters, sortBy) {
+export function savePersistentSearch(extensionName, extension_settings, serviceName, filters, sortBy, advancedFilters = null, jannyAdvancedFilters = null) {
     if (!extension_settings[extensionName].persistentSearchEnabled) {
         return;
     }
     try {
         const data = {
             filters: filters,
-            sortBy: sortBy
+            sortBy: sortBy,
+            advancedFilters: advancedFilters,
+            jannyAdvancedFilters: jannyAdvancedFilters
         };
         const key = `botBrowser_lastSearch_${serviceName}`;
         localStorage.setItem(key, JSON.stringify(data));
@@ -99,7 +101,15 @@ export function addToRecentlyViewed(extensionName, extension_settings, recentlyV
             chunk: card.chunk,
             chunk_idx: card.chunk_idx,
             sourceService: card.sourceService,
-            possibleNsfw: card.possibleNsfw || false
+            possibleNsfw: card.possibleNsfw || false,
+            // Live Chub fields for fetching full data
+            isLiveChub: card.isLiveChub || false,
+            fullPath: card.fullPath || null,
+            nodeId: card.nodeId || null,
+            isLorebook: card.isLorebook || false,
+            // JannyAI fields for fetching full data
+            isJannyAI: card.isJannyAI || false,
+            slug: card.slug || null
         });
 
         // Keep only max allowed
@@ -146,4 +156,93 @@ export function saveImportStats(importStats) {
     } catch (error) {
         console.error('[Bot Browser] Error saving import stats:', error);
     }
+}
+
+// Load bookmarks from localStorage
+export function loadBookmarks() {
+    try {
+        const saved = localStorage.getItem('botBrowser_bookmarks');
+        if (saved) {
+            const bookmarks = JSON.parse(saved);
+            console.log('[Bot Browser] Loaded bookmarks:', bookmarks.length, 'cards');
+            return bookmarks;
+        }
+    } catch (error) {
+        console.error('[Bot Browser] Error loading bookmarks:', error);
+    }
+    return [];
+}
+
+// Save bookmarks to localStorage
+export function saveBookmarks(bookmarks) {
+    try {
+        localStorage.setItem('botBrowser_bookmarks', JSON.stringify(bookmarks));
+    } catch (error) {
+        console.error('[Bot Browser] Error saving bookmarks:', error);
+    }
+}
+
+// Add card to bookmarks
+export function addBookmark(card) {
+    try {
+        let bookmarks = loadBookmarks();
+
+        // Check if already bookmarked
+        if (bookmarks.some(b => b.id === card.id)) {
+            console.log('[Bot Browser] Card already bookmarked:', card.name);
+            return bookmarks;
+        }
+
+        // Add bookmark with essential data
+        bookmarks.unshift({
+            id: card.id,
+            name: card.name,
+            creator: card.creator,
+            avatar_url: card.avatar_url || card.image_url,
+            service: card.service,
+            chunk: card.chunk,
+            chunk_idx: card.chunk_idx,
+            sourceService: card.sourceService,
+            possibleNsfw: card.possibleNsfw || false,
+            isLiveChub: card.isLiveChub || false,
+            fullPath: card.fullPath || null,
+            nodeId: card.nodeId || null,
+            isLorebook: card.isLorebook || false,
+            // JannyAI fields
+            isJannyAI: card.isJannyAI || false,
+            slug: card.slug || null,
+            bookmarkedAt: new Date().toISOString()
+        });
+
+        saveBookmarks(bookmarks);
+        console.log('[Bot Browser] Added bookmark:', card.name);
+        return bookmarks;
+    } catch (error) {
+        console.error('[Bot Browser] Error adding bookmark:', error);
+        return loadBookmarks();
+    }
+}
+
+// Remove card from bookmarks
+export function removeBookmark(cardId) {
+    try {
+        let bookmarks = loadBookmarks();
+        const before = bookmarks.length;
+        bookmarks = bookmarks.filter(b => b.id !== cardId);
+
+        if (bookmarks.length < before) {
+            saveBookmarks(bookmarks);
+            console.log('[Bot Browser] Removed bookmark:', cardId);
+        }
+        return bookmarks;
+    } catch (error) {
+        console.error('[Bot Browser] Error removing bookmark:', error);
+        return loadBookmarks();
+    }
+}
+
+// Check if card is bookmarked
+export function isBookmarked(cardId) {
+    const bookmarks = loadBookmarks();
+    return bookmarks.some(b => b.id === cardId);
 }

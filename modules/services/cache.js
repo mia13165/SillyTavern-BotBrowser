@@ -24,12 +24,258 @@ export async function loadMasterIndex() {
     }
 }
 
-export async function loadServiceIndex(serviceName) {
+// Store Chub API state for pagination
+const chubApiState = {
+    currentPage: 1,
+    hasMore: true,
+    isLoading: false,
+    currentSearch: '',
+    currentSort: 'download_count'
+};
+
+export function getChubApiState() {
+    return chubApiState;
+}
+
+export function resetChubApiState() {
+    chubApiState.currentPage = 1;
+    chubApiState.hasMore = true;
+    chubApiState.isLoading = false;
+    chubApiState.currentSearch = '';
+    chubApiState.currentSort = 'download_count';
+}
+
+/**
+ * Load more Chub cards (for infinite scroll)
+ */
+export async function loadMoreChubCards(options = {}) {
+    if (chubApiState.isLoading || !chubApiState.hasMore) {
+        return [];
+    }
+
+    chubApiState.isLoading = true;
+
+    try {
+        const { searchChubCards, transformChubCard } = await import('./chubApi.js');
+
+        // Map sort options to Chub API sort values
+        const sortMap = {
+            'date_desc': 'created_at',
+            'date_asc': 'created_at',
+            'relevance': 'download_count',
+            'name_asc': 'name',
+            'name_desc': 'name'
+        };
+
+        const apiSort = sortMap[options.sort] || 'download_count';
+        const isAsc = options.sort === 'date_asc' || options.sort === 'name_asc';
+
+        // Update state with current search/sort
+        if (options.search !== undefined) chubApiState.currentSearch = options.search;
+        if (options.sort !== undefined) chubApiState.currentSort = options.sort;
+
+        console.log(`[Bot Browser] Loading Chub page ${chubApiState.currentPage}, search: "${chubApiState.currentSearch}", sort: ${apiSort}`);
+
+        const result = await searchChubCards({
+            limit: 48,
+            page: chubApiState.currentPage,
+            search: chubApiState.currentSearch,
+            sort: apiSort,
+            asc: isAsc,
+            // NSFW filter - if hideNsfw is true, tell API to exclude NSFW content
+            nsfw: options.hideNsfw ? false : true,
+            nsfl: options.hideNsfw ? false : true,
+            // Advanced filters
+            minTokens: options.minTokens,
+            maxTokens: options.maxTokens,
+            tags: options.customTags,
+            excludeTags: options.excludeTags,
+            username: options.creatorUsername,
+            maxDaysAgo: options.maxDaysAgo,
+            minAiRating: options.minAiRating,
+            requireExamples: options.requireExamples,
+            requireLore: options.requireLore,
+            requireGreetings: options.requireGreetings
+        });
+
+        let nodes = [];
+        if (Array.isArray(result)) {
+            nodes = result;
+        } else if (result && result.data && Array.isArray(result.data.nodes)) {
+            // API returns { data: { nodes: [...], count, cursor } }
+            nodes = result.data.nodes;
+        } else if (result && Array.isArray(result.nodes)) {
+            nodes = result.nodes;
+        }
+
+        const cards = nodes.map(transformChubCard);
+        console.log(`[Bot Browser] Loaded ${cards.length} cards from Chub API page ${chubApiState.currentPage}`);
+
+        // Check if there are more pages - use cursor if available, otherwise check count
+        const hasCursor = result?.data?.cursor != null;
+        if (cards.length < 48 && !hasCursor) {
+            chubApiState.hasMore = false;
+        } else {
+            chubApiState.currentPage++;
+        }
+
+        // Append to existing cache
+        if (!loadedData.serviceIndexes['chub']) {
+            loadedData.serviceIndexes['chub'] = [];
+        }
+        loadedData.serviceIndexes['chub'].push(...cards);
+
+        chubApiState.isLoading = false;
+        return cards;
+    } catch (error) {
+        console.error('[Bot Browser] Failed to load more Chub cards:', error);
+        chubApiState.isLoading = false;
+        return [];
+    }
+}
+
+// Store Chub Lorebooks API state for pagination
+const chubLorebooksApiState = {
+    currentPage: 1,
+    hasMore: true,
+    isLoading: false,
+    currentSearch: '',
+    currentSort: 'star_count'
+};
+
+export function getChubLorebooksApiState() {
+    return chubLorebooksApiState;
+}
+
+export function resetChubLorebooksApiState() {
+    chubLorebooksApiState.currentPage = 1;
+    chubLorebooksApiState.hasMore = true;
+    chubLorebooksApiState.isLoading = false;
+    chubLorebooksApiState.currentSearch = '';
+    chubLorebooksApiState.currentSort = 'star_count';
+}
+
+/**
+ * Load more Chub lorebooks (for infinite scroll)
+ */
+export async function loadMoreChubLorebooks(options = {}) {
+    if (chubLorebooksApiState.isLoading || !chubLorebooksApiState.hasMore) {
+        return [];
+    }
+
+    chubLorebooksApiState.isLoading = true;
+
+    try {
+        const { searchChubLorebooks, transformChubLorebook } = await import('./chubApi.js');
+
+        // Map sort options to Chub API sort values
+        const sortMap = {
+            'date_desc': 'created_at',
+            'date_asc': 'created_at',
+            'relevance': 'star_count',
+            'name_asc': 'name',
+            'name_desc': 'name'
+        };
+
+        const apiSort = sortMap[options.sort] || 'star_count';
+        const isAsc = options.sort === 'date_asc' || options.sort === 'name_asc';
+
+        // Update state with current search/sort
+        if (options.search !== undefined) chubLorebooksApiState.currentSearch = options.search;
+        if (options.sort !== undefined) chubLorebooksApiState.currentSort = options.sort;
+
+        console.log(`[Bot Browser] Loading Chub lorebooks page ${chubLorebooksApiState.currentPage}, search: "${chubLorebooksApiState.currentSearch}", sort: ${apiSort}`);
+
+        const result = await searchChubLorebooks({
+            limit: 48,
+            page: chubLorebooksApiState.currentPage,
+            search: chubLorebooksApiState.currentSearch,
+            sort: apiSort,
+            asc: isAsc,
+            // NSFW filter - if hideNsfw is true, tell API to exclude NSFW content
+            nsfw: options.hideNsfw ? false : true,
+            nsfl: options.hideNsfw ? false : true,
+            // Filters
+            tags: options.customTags,
+            excludeTags: options.excludeTags,
+            username: options.creatorUsername
+        });
+
+        let nodes = [];
+        if (Array.isArray(result)) {
+            nodes = result;
+        } else if (result && result.data && Array.isArray(result.data.nodes)) {
+            nodes = result.data.nodes;
+        } else if (result && Array.isArray(result.nodes)) {
+            nodes = result.nodes;
+        }
+
+        const lorebooks = nodes.map(transformChubLorebook);
+        console.log(`[Bot Browser] Loaded ${lorebooks.length} lorebooks from Chub API page ${chubLorebooksApiState.currentPage}`);
+
+        // Check if there are more pages
+        if (lorebooks.length < 48) {
+            chubLorebooksApiState.hasMore = false;
+        } else {
+            chubLorebooksApiState.currentPage++;
+        }
+
+        // Append to existing cache
+        if (!loadedData.serviceIndexes['chub_lorebooks']) {
+            loadedData.serviceIndexes['chub_lorebooks'] = [];
+        }
+        loadedData.serviceIndexes['chub_lorebooks'].push(...lorebooks);
+
+        chubLorebooksApiState.isLoading = false;
+        return lorebooks;
+    } catch (error) {
+        console.error('[Bot Browser] Failed to load more Chub lorebooks:', error);
+        chubLorebooksApiState.isLoading = false;
+        return [];
+    }
+}
+
+export async function loadServiceIndex(serviceName, useLiveApi = false, options = {}) {
     // Handle QuillGen specially - it uses API-based loading
     if (serviceName === 'quillgen') {
         return loadQuillgenIndex();
     }
 
+    // For chub_lorebooks with live API enabled, fetch from Gateway API
+    if (serviceName === 'chub_lorebooks' && useLiveApi) {
+        resetChubLorebooksApiState();
+        delete loadedData.serviceIndexes[serviceName];
+
+        try {
+            const lorebooks = await loadMoreChubLorebooks(options);
+            return lorebooks;
+        } catch (error) {
+            console.error('[Bot Browser] Chub Lorebooks API failed:', error);
+            // Fall through to archive method below
+        }
+    }
+
+    // For chub with live API enabled, always fetch fresh from API (don't use cache)
+    // This ensures users get the latest cards
+    if (serviceName === 'chub' && useLiveApi) {
+        // Reset pagination state for fresh load
+        resetChubApiState();
+
+        // Clear any cached chub data to ensure fresh API results
+        delete loadedData.serviceIndexes[serviceName];
+
+        try {
+            // Load first page
+            const cards = await loadMoreChubCards(options);
+            return cards;
+        } catch (error) {
+            console.error('[Bot Browser] Chub API failed:', error);
+            console.error('[Bot Browser] Error stack:', error.stack);
+            // Fall through to archive method below
+        }
+    }
+
+    // Return cached data if available (for non-chub or when API fails)
     if (loadedData.serviceIndexes[serviceName]) {
         return loadedData.serviceIndexes[serviceName];
     }
@@ -244,7 +490,7 @@ export async function initializeServiceCache(showCardDetailFunc) {
     try {
         await loadMasterIndex();
 
-        const allServices = ['character_tavern', 'catbox', 'webring', 'chub', 'anchorhold', 'risuai_realm', 'nyai_me', 'desuarchive', 'mlpchag'];
+        const allServices = ['catbox', 'webring', 'chub', 'anchorhold', 'risuai_realm', 'nyai_me', 'character_tavern',  'desuarchive', 'mlpchag'];
         let defaultAvatarCard = null;
         let cachedServices = {};
 

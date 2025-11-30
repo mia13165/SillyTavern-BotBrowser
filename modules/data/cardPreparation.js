@@ -1,5 +1,5 @@
 import { escapeCardTextFields, processLorebookEntries } from '../utils/textPreparation.js';
-import { extractCardProperties, getLorebookInfo } from '../utils/cardExtraction.js';
+import { extractCardProperties, getLorebookInfo } from '../utils/utils.js';
 
 export function prepareCardDataForModal(fullCard, isLorebook) {
     const extractedProperties = extractCardProperties(fullCard);

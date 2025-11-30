@@ -1,6 +1,9 @@
-import { escapeHTML } from './utils.js';
+import { escapeHTML, safeString, safeKeywords } from './utils.js';
 
 export function escapeCardTextFields(fullCard, tags, alternateGreetings, exampleMessages) {
+    const safeTags = Array.isArray(tags) ? tags : [];
+    const safeAltGreetings = Array.isArray(alternateGreetings) ? alternateGreetings : [];
+
     return {
         cardName: escapeHTML(fullCard.name),
         cardCreator: escapeHTML(fullCard.creator || ''),
@@ -10,10 +13,10 @@ export function escapeCardTextFields(fullCard, tags, alternateGreetings, example
         personality: escapeHTML(fullCard.personality || ''),
         scenario: escapeHTML(fullCard.scenario || ''),
         firstMessage: escapeHTML(fullCard.first_message || ''),
-        exampleMsg: escapeHTML(exampleMessages),
-        tags: tags.map(tag => escapeHTML(tag)),
+        exampleMsg: escapeHTML(exampleMessages || ''),
+        tags: safeTags.map(tag => escapeHTML(tag)),
         creator: escapeHTML(fullCard.creator || ''),
-        alternateGreetings: alternateGreetings.map(greeting => escapeHTML(greeting)),
+        alternateGreetings: safeAltGreetings.map(greeting => escapeHTML(greeting)),
     };
 }
 
@@ -24,15 +27,15 @@ export function processLorebookEntries(entries) {
 
     if (Array.isArray(entries)) {
         return entries.map((entry, index) => ({
-            name: escapeHTML(entry.name || `Entry ${index}`),
-            keywords: (entry.keywords || []).map(kw => escapeHTML(kw)),
-            content: escapeHTML(entry.content || entry.description || entry)
+            name: escapeHTML(safeString(entry.name) || `Entry ${index}`),
+            keywords: safeKeywords(entry.keys || entry.keywords).map(kw => escapeHTML(kw)),
+            content: escapeHTML(safeString(entry.content || entry.description))
         }));
     }
 
     return Object.entries(entries).map(([key, entry]) => ({
-        name: escapeHTML(entry.name || `Entry ${key}`),
-        keywords: (entry.keywords || []).map(kw => escapeHTML(kw)),
-        content: escapeHTML(entry.content || entry.description || entry)
+        name: escapeHTML(safeString(entry.name || entry.comment) || `Entry ${key}`),
+        keywords: safeKeywords(entry.keys || entry.keywords || entry.key).map(kw => escapeHTML(kw)),
+        content: escapeHTML(safeString(entry.content || entry.description))
     }));
 }

@@ -1,35 +1,110 @@
 import { loadCardChunk } from '../services/cache.js';
-import { addToRecentlyViewed } from '../storage/storage.js';
+import { addToRecentlyViewed, isBookmarked, addBookmark, removeBookmark } from '../storage/storage.js';
 import { buildDetailModalHTML } from '../templates/detailModal.js';
 import { prepareCardDataForModal } from '../data/cardPreparation.js';
+import { getChubCharacter, transformFullChubCharacter, getChubLorebook } from '../services/chubApi.js';
+import { fetchJannyCharacterDetails, transformFullJannyCharacter } from '../services/jannyApi.js';
 
-// Show card detail modal
+let isOpeningModal = false;
+
 export async function showCardDetail(card, extensionName, extension_settings, state, save=true) {
-    let fullCard = await loadFullCard(card);
-
-    // Verify we're showing the right card
-    if (fullCard.name !== card.name) {
-        console.error('[Bot Browser] Card name mismatch - clicked:', card.name, 'but loaded:', fullCard.name);
-        toastr.error('Error loading card data', 'Error', { timeOut: 3000 });
+    if (isOpeningModal) {
+        console.log('[Bot Browser] Modal already opening, ignoring duplicate click');
+        return;
     }
+    isOpeningModal = true;
 
-    state.selectedCard = fullCard;
+    try {
+        let fullCard = await loadFullCard(card);
 
-    if (save) {
-        state.recentlyViewed = addToRecentlyViewed(extensionName, extension_settings, state.recentlyViewed, fullCard);
+        const clickedName = (card.name || '').trim().toLowerCase();
+        const loadedName = (fullCard.name || '').trim().toLowerCase();
+        if (clickedName && loadedName && clickedName !== loadedName) {
+            console.warn('[Bot Browser] Card name mismatch - clicked:', card.name, 'but loaded:', fullCard.name);
+            // Don't show error toast - this can happen with minor formatting differences
+        }
+
+        state.selectedCard = fullCard;
+
+        if (save) {
+            state.recentlyViewed = addToRecentlyViewed(extensionName, extension_settings, state.recentlyViewed, fullCard);
+        }
+
+        const { detailOverlay, detailModal } = createDetailModal(fullCard);
+
+        document.body.appendChild(detailOverlay);
+        document.body.appendChild(detailModal);
+
+        setupDetailModalEvents(detailModal, detailOverlay, fullCard, state);
+
+        isOpeningModal = false;
+    } catch (error) {
+        console.error('[Bot Browser] Error showing card detail:', error);
+        isOpeningModal = false;
+        throw error;
     }
-
-    const { detailOverlay, detailModal } = createDetailModal(fullCard);
-
-    document.body.appendChild(detailOverlay);
-    document.body.appendChild(detailModal);
-
-    setupDetailModalEvents(detailModal, detailOverlay, fullCard, state);
 }
 
 async function loadFullCard(card) {
     let fullCard = card;
     const chunkService = card.sourceService || card.service;
+
+    const looksLikeChubCard = (card.isLiveChub) ||
+        (card.service === 'chub') ||
+        (card.sourceService === 'chub') ||
+        (card.id && /^[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+$/.test(card.id) && !card.chunk);
+
+    const chubFullPath = card.fullPath || (looksLikeChubCard ? card.id : null);
+
+    if (card.isLiveChub && card.isLorebook && card.nodeId) {
+        try {
+            console.log('[Bot Browser] Fetching full Chub lorebook data for:', card.fullPath, 'nodeId:', card.nodeId);
+            const lorebookData = await getChubLorebook(card.nodeId);
+            if (lorebookData) {
+                // The lorebook data should have entries in SillyTavern format
+                // Preserve the original card's display name (search results name), but take entries from lorebookData
+                fullCard = { ...card, ...lorebookData, name: card.name };
+                console.log('[Bot Browser] Loaded full Chub lorebook data:', fullCard.name, 'entries:', Object.keys(lorebookData.entries || {}).length);
+                return fullCard;
+            } else {
+                console.log('[Bot Browser] Lorebook data unavailable (private/deleted)');
+            }
+        } catch (error) {
+            console.error('[Bot Browser] Failed to load full Chub lorebook:', error);
+            // Fall through to return original card data
+        }
+    }
+    else if (looksLikeChubCard && chubFullPath && !card.isLorebook) {
+        try {
+            console.log('[Bot Browser] Fetching full Chub character data for:', chubFullPath);
+            const charData = await getChubCharacter(chubFullPath);
+            const fullData = transformFullChubCharacter(charData);
+            fullCard = { ...card, ...fullData, isLiveChub: true, fullPath: chubFullPath };
+            console.log('[Bot Browser] Loaded full Chub character data:', fullCard.name);
+            return fullCard;
+        } catch (error) {
+            console.error('[Bot Browser] Failed to load full Chub character:', error);
+            // Fall through to return original card data
+        }
+    }
+
+    const looksLikeJannyCard = (card.isJannyAI) ||
+        (card.service === 'jannyai') ||
+        (card.sourceService === 'jannyai');
+
+    if (looksLikeJannyCard && card.id && card.slug) {
+        try {
+            console.log('[Bot Browser] Fetching full JannyAI character data for:', card.id);
+            const jannyData = await fetchJannyCharacterDetails(card.id, card.slug);
+            const fullData = transformFullJannyCharacter(jannyData);
+            fullCard = { ...card, ...fullData, isJannyAI: true };
+            console.log('[Bot Browser] Loaded full JannyAI character data:', fullCard.name);
+            return fullCard;
+        } catch (error) {
+            console.error('[Bot Browser] Failed to load full JannyAI character:', error);
+            // Fall through to return original card data
+        }
+    }
 
     if (card.entries && typeof card.entries === 'object' && Object.keys(card.entries).length > 0) {
         return card;
@@ -83,10 +158,10 @@ function createDetailModal(fullCard) {
     detailModal.id = 'bot-browser-detail-modal';
     detailModal.className = 'bot-browser-detail-modal';
 
-    // Detect if this is a lorebook based on presence of entries object
-    const isLorebook = fullCard.entries && typeof fullCard.entries === 'object' && !Array.isArray(fullCard.entries);
+    const isLorebook = fullCard.isLorebook || (fullCard.entries && typeof fullCard.entries === 'object' && !Array.isArray(fullCard.entries));
 
     const cardData = prepareCardDataForModal(fullCard, isLorebook);
+    const cardIsBookmarked = isBookmarked(fullCard.id);
 
     detailModal.innerHTML = buildDetailModalHTML(
         cardData.cardName,
@@ -105,7 +180,8 @@ function createDetailModal(fullCard) {
         cardData.exampleMsg,
         cardData.processedEntries,
         cardData.entriesCount,
-        cardData.metadata
+        cardData.metadata,
+        cardIsBookmarked
     );
 
     return { detailOverlay, detailModal };
@@ -127,7 +203,6 @@ function setupDetailModalEvents(detailModal, detailOverlay, fullCard, state) {
         closeDetailModal();
     });
 
-    // Prevent all events from bubbling through the overlay
     detailOverlay.addEventListener('mousedown', (e) => {
         e.stopPropagation();
         e.stopImmediatePropagation();
@@ -164,7 +239,6 @@ function setupDetailModalEvents(detailModal, detailOverlay, fullCard, state) {
         });
     });
 
-    // Prevent modal clicks from closing it
     detailModal.addEventListener('click', (e) => {
         e.stopPropagation();
         e.stopImmediatePropagation();
@@ -180,11 +254,33 @@ function setupDetailModalEvents(detailModal, detailOverlay, fullCard, state) {
         e.stopImmediatePropagation();
     });
 
-    // Validate detail modal image and show fallback if it fails to load
+    const bookmarkBtn = detailModal.querySelector('.bot-browser-bookmark-btn');
+    if (bookmarkBtn) {
+        bookmarkBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+
+            const isCurrentlyBookmarked = bookmarkBtn.classList.contains('bookmarked');
+
+            if (isCurrentlyBookmarked) {
+                removeBookmark(fullCard.id);
+                bookmarkBtn.classList.remove('bookmarked');
+                bookmarkBtn.querySelector('i').className = 'fa-regular fa-bookmark';
+                bookmarkBtn.querySelector('span').textContent = 'Bookmark';
+                toastr.info('Removed from bookmarks', '', { timeOut: 2000 });
+            } else {
+                addBookmark(fullCard);
+                bookmarkBtn.classList.add('bookmarked');
+                bookmarkBtn.querySelector('i').className = 'fa-solid fa-bookmark';
+                bookmarkBtn.querySelector('span').textContent = 'Bookmarked';
+                toastr.success('Added to bookmarks', '', { timeOut: 2000 });
+            }
+        });
+    }
+
     validateDetailModalImage(detailModal, fullCard);
 }
 
-// Validate the detail modal image and show fallback if needed
 function validateDetailModalImage(detailModal, card) {
     const imageDiv = detailModal.querySelector('.bot-browser-detail-image');
     if (!imageDiv) return;
@@ -216,7 +312,6 @@ function validateDetailModalImage(detailModal, card) {
     testImg.src = imageUrl;
 }
 
-// Helper function to show detail modal image error
 function showDetailImageError(imageDiv, errorCode, imageUrl) {
     imageDiv.style.backgroundImage = 'none';
     imageDiv.classList.add('image-load-failed');
@@ -235,7 +330,6 @@ function showDetailImageError(imageDiv, errorCode, imageUrl) {
     console.log(`[Bot Browser] Detail modal image failed to load (${errorCode}):`, imageUrl);
 }
 
-// Close detail modal
 export function closeDetailModal() {
     const detailModal = document.getElementById('bot-browser-detail-modal');
     const detailOverlay = document.getElementById('bot-browser-detail-overlay');
@@ -243,12 +337,13 @@ export function closeDetailModal() {
     if (detailModal) detailModal.remove();
     if (detailOverlay) detailOverlay.remove();
 
+    // Reset the modal opening guard
+    isOpeningModal = false;
+
     console.log('[Bot Browser] Card detail modal closed');
 }
 
-// Show image in full-screen lightbox
 export function showImageLightbox(imageUrl) {
-    // Create lightbox overlay with extremely high z-index
     const lightbox = document.createElement('div');
     lightbox.id = 'bot-browser-image-lightbox';
     lightbox.style.cssText = `
@@ -283,7 +378,6 @@ export function showImageLightbox(imageUrl) {
         display: block !important;
     `;
 
-    // Add error handling for image load failure
     img.onerror = () => {
         // Replace image with error message
         const errorDiv = document.createElement('div');
@@ -351,7 +445,6 @@ export function showImageLightbox(imageUrl) {
 
     let isClosing = false;
 
-    // Close on click (anywhere) or ESC key
     const closeLightbox = () => {
         if (isClosing) return;
         isClosing = true;
@@ -369,20 +462,17 @@ export function showImageLightbox(imageUrl) {
         }
     });
 
-    // Close button handler
     closeBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         e.stopImmediatePropagation();
         closeLightbox();
     });
 
-    // Stop image clicks from propagating
     img.addEventListener('click', (e) => {
         e.stopPropagation();
         e.stopImmediatePropagation();
     });
 
-    // Close on ESC key
     const handleKeyDown = (e) => {
         if (e.key === 'Escape') {
             e.preventDefault();

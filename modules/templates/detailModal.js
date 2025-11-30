@@ -1,6 +1,6 @@
 import { sanitizeImageUrl } from '../utils/utils.js';
 
-export function buildDetailModalHTML(cardName, imageUrl, isLorebook, cardCreator, tags, creator, websiteDesc, description, descPreview, personality, scenario, firstMessage, alternateGreetings, exampleMsg, entries, entriesCount, metadata) {
+export function buildDetailModalHTML(cardName, imageUrl, isLorebook, cardCreator, tags, creator, websiteDesc, description, descPreview, personality, scenario, firstMessage, alternateGreetings, exampleMsg, entries, entriesCount, metadata, isBookmarked = false) {
     const safeImageUrl = sanitizeImageUrl(imageUrl);
     return `
         <div class="bot-browser-detail-header">
@@ -12,6 +12,19 @@ export function buildDetailModalHTML(cardName, imageUrl, isLorebook, cardCreator
 
         <div class="bot-browser-detail-content">
             <div class="bot-browser-detail-scroll-container">
+                <div class="bot-browser-detail-actions">
+                    <button class="bot-browser-import-button">
+                        <i class="fa-solid fa-download"></i> Import to SillyTavern
+                    </button>
+                    <button class="bot-browser-bookmark-btn ${isBookmarked ? 'bookmarked' : ''}">
+                        <i class="fa-${isBookmarked ? 'solid' : 'regular'} fa-bookmark"></i>
+                        <span>${isBookmarked ? 'Bookmarked' : 'Bookmark'}</span>
+                    </button>
+                    <button class="bot-browser-detail-back">
+                        <i class="fa-solid fa-arrow-left"></i> Back to Results
+                    </button>
+                </div>
+
                 <div class="bot-browser-detail-image ${safeImageUrl ? 'clickable-image' : ''}" style="background-image: url('${safeImageUrl}');" ${safeImageUrl ? `data-image-url="${safeImageUrl}" title="Click to enlarge"` : ''}>
                     ${!safeImageUrl ? '<i class="fa-solid fa-user"></i>' : ''}
                     ${safeImageUrl ? '<div style="position: absolute; bottom: 6px; right: 6px; background: rgba(0,0,0,0.5); padding: 3px 6px; border-radius: 3px; font-size: 10px; color: rgba(255,255,255,0.7); pointer-events: none;"><i class="fa-solid fa-search-plus" style="font-size: 9px; margin-right: 3px;"></i>Click to enlarge</div>' : ''}
@@ -21,15 +34,6 @@ export function buildDetailModalHTML(cardName, imageUrl, isLorebook, cardCreator
                     ${buildDetailSections(isLorebook, cardCreator, tags, creator, websiteDesc, description, descPreview, personality, scenario, firstMessage, alternateGreetings, exampleMsg, entries, entriesCount, metadata)}
                 </div>
             </div>
-        </div>
-
-        <div class="bot-browser-detail-actions">
-            <button class="bot-browser-import-button">
-                <i class="fa-solid fa-download"></i> Import to SillyTavern
-            </button>
-            <button class="bot-browser-detail-back">
-                <i class="fa-solid fa-arrow-left"></i> Back to Results
-            </button>
         </div>
     `;
 }
@@ -160,7 +164,6 @@ function buildAlternateGreetingsSection(alternateGreetings) {
 }
 
 function buildLorebookEntriesSection(entries, entriesCount) {
-    // entries is expected to be an array of {name, keywords, content}
     return `
                 <div class="bot-browser-detail-section">
                     <h4>Lorebook Entries (${entriesCount}) (Preview)</h4>

@@ -2,7 +2,7 @@ import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, saveSettingsDebounced, processDroppedFiles, getRequestHeaders } from '../../../../script.js';
 
 // Import modules
-import { loadImportStats, saveImportStats, loadRecentlyViewed } from './modules/storage/storage.js';
+import { loadImportStats, saveImportStats, loadRecentlyViewed, loadPersistentSearch, loadBookmarks, removeBookmark } from './modules/storage/storage.js';
 import { getTimeAgo } from './modules/storage/stats.js';
 import { loadServiceIndex, initializeServiceCache, clearQuillgenCache } from './modules/services/cache.js';
 import { getRandomCard } from './modules/services/cards.js';
@@ -11,6 +11,9 @@ import { showCardDetail, closeDetailModal, showImageLightbox } from './modules/m
 import { createCardBrowser, refreshCardGrid } from './modules/browser.js';
 import { getOriginalMenuHTML, createBottomActions } from './modules/templates/templates.js';
 import { escapeHTML } from './modules/utils/utils.js';
+import { searchJannyCharacters, transformJannyCard, JANNYAI_TAGS } from './modules/services/jannyApi.js';
+import { fetchJannyCollections, fetchJannyCollectionDetails } from './modules/services/jannyCollectionsApi.js';
+import { createCollectionCardHTML, createCollectionsBrowserHeader } from './modules/templates/templates.js';
 
 // Extension name and settings
 const extensionName = 'BotBrowser';
@@ -48,7 +51,8 @@ const defaultSettings = {
     hideNsfw: false,
     trackStats: true,
     tagBlocklist: [],
-    quillgenApiKey: ''
+    quillgenApiKey: '',
+    useChubLiveApi: true
 };
 
 // Stats storage
@@ -185,8 +189,45 @@ async function showCardDetailWrapper(card, save = true) {
     }
 }
 
+// Navigate back to collections browser (when viewing collection characters)
+function navigateBackToCollections() {
+    const menu = document.getElementById('bot-browser-menu');
+    if (!menu) return;
+
+    // Restore collections data from saved state
+    if (collectionsState.lastCollectionData) {
+        collectionsState.collections = collectionsState.lastCollectionData.collections;
+        collectionsState.pagination = collectionsState.lastCollectionData.pagination;
+        collectionsState.sort = collectionsState.lastCollectionData.sort;
+        collectionsState.currentPage = collectionsState.lastCollectionData.currentPage;
+    }
+
+    // Clear the tracking flag
+    collectionsState.viewingCollectionCharacters = false;
+    collectionsState.lastCollectionData = null;
+
+    // Re-create collections browser with saved data
+    createCollectionsBrowser({
+        collections: collectionsState.collections,
+        pagination: collectionsState.pagination,
+        sort: collectionsState.sort
+    }, menu);
+
+    console.log('[Bot Browser] Navigated back to collections browser');
+}
+
 // Navigate back to sources view
 function navigateToSources() {
+    // Check if we should go back to collections browser instead
+    if (collectionsState.viewingCollectionCharacters) {
+        navigateBackToCollections();
+        return;
+    }
+
+    // Reset collections state when going back to main sources
+    collectionsState.viewingCollectionCharacters = false;
+    collectionsState.lastCollectionData = null;
+
     state.view = 'sources';
     state.currentService = null;
     state.currentCards = [];
@@ -234,6 +275,77 @@ function setupTabSwitching(menu) {
 
             button.classList.add('active');
             menu.querySelector(`.bot-browser-tab-content[data-content="${targetTab}"]`).classList.add('active');
+
+            // Populate bookmarks tab when switching to it
+            if (targetTab === 'bookmarks') {
+                populateBookmarksTab(menu);
+            }
+        });
+    });
+}
+
+// Populate bookmarks tab with saved bookmarks
+function populateBookmarksTab(menu) {
+    const bookmarks = loadBookmarks();
+    const bookmarksGrid = menu.querySelector('.bot-browser-bookmarks-grid');
+    const bookmarksEmpty = menu.querySelector('.bot-browser-bookmarks-empty');
+
+    if (!bookmarksGrid) return;
+
+    if (bookmarks.length === 0) {
+        bookmarksEmpty.style.display = 'flex';
+        bookmarksGrid.style.display = 'none';
+        bookmarksGrid.innerHTML = '';
+        return;
+    }
+
+    bookmarksEmpty.style.display = 'none';
+    bookmarksGrid.style.display = 'grid';
+
+    bookmarksGrid.innerHTML = bookmarks.map(card => `
+        <div class="bot-browser-bookmark-card" data-card-id="${card.id}" data-nsfw="${card.possibleNsfw ? 'true' : 'false'}">
+            <div class="bookmark-image" style="background-image: url('${escapeHTML(card.avatar_url || '')}');"></div>
+            <div class="bookmark-name">${escapeHTML(card.name)}</div>
+            <button class="bookmark-remove" title="Remove bookmark">
+                <i class="fa-solid fa-times"></i>
+            </button>
+        </div>
+    `).join('');
+
+    // Add click handlers
+    bookmarksGrid.querySelectorAll('.bot-browser-bookmark-card').forEach(cardEl => {
+        cardEl.addEventListener('click', async (e) => {
+            if (e.target.closest('.bookmark-remove')) return;
+            e.stopPropagation();
+            e.preventDefault();
+
+            const cardId = cardEl.dataset.cardId;
+            const card = bookmarks.find(c => c.id === cardId);
+
+            if (card) {
+                console.log('[Bot Browser] Opening bookmarked card:', card.name);
+                await showCardDetailWrapper(card);
+            }
+        });
+
+        // Remove bookmark button
+        const removeBtn = cardEl.querySelector('.bookmark-remove');
+        removeBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+
+            const cardId = cardEl.dataset.cardId;
+            removeBookmark(cardId);
+            cardEl.remove();
+
+            // Check if empty
+            const remaining = bookmarksGrid.querySelectorAll('.bot-browser-bookmark-card');
+            if (remaining.length === 0) {
+                bookmarksEmpty.style.display = 'flex';
+                bookmarksGrid.style.display = 'none';
+            }
+
+            toastr.info('Removed from bookmarks', '', { timeOut: 2000 });
         });
     });
 }
@@ -272,6 +384,258 @@ function setupRecentlyViewedCards(menu) {
     }
 }
 
+// Collections browser state
+let collectionsState = {
+    collections: [],
+    pagination: null,
+    sort: 'popular',
+    currentPage: 1,
+    // Track if we navigated from collections to a character browser
+    viewingCollectionCharacters: false,
+    lastCollectionData: null
+};
+
+// Create collections browser
+function createCollectionsBrowser(collectionsData, menu) {
+    state.view = 'collections';
+    state.currentService = 'jannyai_collections';
+
+    collectionsState.collections = collectionsData.collections;
+    collectionsState.pagination = collectionsData.pagination;
+    collectionsState.sort = collectionsData.sort;
+    collectionsState.currentPage = collectionsData.pagination.currentPage;
+
+    const menuContent = menu.querySelector('.bot-browser-content');
+    const cardCountText = `${collectionsData.pagination.totalEntries} collections`;
+
+    menuContent.innerHTML = createCollectionsBrowserHeader(collectionsState.sort, cardCountText);
+
+    // Render collections
+    renderCollectionsPage(menuContent);
+
+    // Setup event listeners
+    setupCollectionsBrowserEvents(menuContent, menu);
+
+    console.log('[Bot Browser] Collections browser created');
+}
+
+// Render collections page
+function renderCollectionsPage(menuContent) {
+    const gridContainer = menuContent.querySelector('.bot-browser-card-grid');
+    if (!gridContainer) return;
+
+    const collectionsHTML = collectionsState.collections.map(c => createCollectionCardHTML(c)).join('');
+
+    // Create pagination
+    const paginationHTML = collectionsState.pagination.totalPages > 1 ? `
+        <div class="bot-browser-pagination">
+            <button class="bot-browser-pagination-btn" data-action="prev" ${collectionsState.currentPage === 1 ? 'disabled' : ''}>
+                <i class="fa-solid fa-angle-left"></i> Prev
+            </button>
+            <span class="bot-browser-pagination-info">Page ${collectionsState.currentPage} of ${collectionsState.pagination.totalPages}</span>
+            <button class="bot-browser-pagination-btn" data-action="next" ${!collectionsState.pagination.hasMore ? 'disabled' : ''}>
+                Next <i class="fa-solid fa-angle-right"></i>
+            </button>
+        </div>
+    ` : '';
+
+    gridContainer.innerHTML = collectionsHTML + paginationHTML;
+
+    // Attach collection click handlers
+    gridContainer.querySelectorAll('.bot-browser-collection-card').forEach(cardEl => {
+        cardEl.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+
+            const collectionId = cardEl.dataset.collectionId;
+            const collectionSlug = cardEl.dataset.collectionSlug;
+
+            console.log('[Bot Browser] Opening collection:', collectionId, collectionSlug);
+
+            try {
+                toastr.info('Loading collection...', '', { timeOut: 2000 });
+                const collectionDetails = await fetchJannyCollectionDetails(collectionId, collectionSlug);
+
+                if (collectionDetails.characters.length === 0) {
+                    toastr.warning('This collection appears to be empty or could not be loaded');
+                    return;
+                }
+
+                // Switch to card browser with collection characters
+                const cards = collectionDetails.characters.map(char => ({
+                    ...char,
+                    sourceService: 'jannyai',
+                    isJannyAI: true
+                }));
+
+                // Track that we're viewing collection characters (for back button)
+                collectionsState.viewingCollectionCharacters = true;
+                collectionsState.lastCollectionData = {
+                    collections: collectionsState.collections,
+                    pagination: collectionsState.pagination,
+                    sort: collectionsState.sort,
+                    currentPage: collectionsState.currentPage
+                };
+
+                createCardBrowser(`${collectionDetails.name}`, cards, state, extensionName, extension_settings, showCardDetailWrapper);
+            } catch (error) {
+                console.error('[Bot Browser] Error loading collection:', error);
+                toastr.error('Failed to load collection: ' + error.message);
+            }
+        });
+    });
+
+    // Attach pagination handlers
+    gridContainer.querySelectorAll('.bot-browser-pagination-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+
+            const action = btn.dataset.action;
+
+            if (action === 'prev' && collectionsState.currentPage > 1) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+                try {
+                    const newData = await fetchJannyCollections({
+                        page: collectionsState.currentPage - 1,
+                        sort: collectionsState.sort
+                    });
+
+                    collectionsState.collections = newData.collections;
+                    collectionsState.pagination = newData.pagination;
+                    collectionsState.currentPage = newData.pagination.currentPage;
+
+                    renderCollectionsPage(menuContent);
+                } catch (error) {
+                    console.error('[Bot Browser] Error loading prev page:', error);
+                    toastr.error('Failed to load page');
+                    btn.disabled = false;
+                    btn.innerHTML = '<i class="fa-solid fa-angle-left"></i> Prev';
+                }
+            } else if (action === 'next' && collectionsState.pagination.hasMore) {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>';
+
+                try {
+                    const newData = await fetchJannyCollections({
+                        page: collectionsState.currentPage + 1,
+                        sort: collectionsState.sort
+                    });
+
+                    collectionsState.collections = newData.collections;
+                    collectionsState.pagination = newData.pagination;
+                    collectionsState.currentPage = newData.pagination.currentPage;
+
+                    renderCollectionsPage(menuContent);
+                } catch (error) {
+                    console.error('[Bot Browser] Error loading next page:', error);
+                    toastr.error('Failed to load page');
+                    btn.disabled = false;
+                    btn.innerHTML = 'Next <i class="fa-solid fa-angle-right"></i>';
+                }
+            }
+        });
+    });
+
+    // Scroll to top - scroll the wrapper which contains search + grid
+    const wrapper = menuContent.querySelector('.bot-browser-card-grid-wrapper');
+    if (wrapper) wrapper.scrollTop = 0;
+}
+
+// Setup collections browser events
+function setupCollectionsBrowserEvents(menuContent, menu) {
+    // Back button
+    const backButton = menuContent.querySelector('.bot-browser-back-button');
+    if (backButton) {
+        backButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            navigateToSources();
+        });
+    }
+
+    // Close button
+    const closeButton = menuContent.querySelector('.bot-browser-close');
+    if (closeButton) {
+        closeButton.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            closeBotBrowserMenu();
+        });
+    }
+
+    // Toggle search
+    const toggleSearchBtn = menuContent.querySelector('.bot-browser-toggle-search');
+    const searchSection = menuContent.querySelector('.bot-browser-search-section');
+    if (toggleSearchBtn && searchSection) {
+        toggleSearchBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            searchSection.classList.toggle('collapsed');
+            const icon = toggleSearchBtn.querySelector('i');
+            icon.classList.toggle('fa-chevron-up');
+            icon.classList.toggle('fa-chevron-down');
+        });
+    }
+
+    // Sort dropdown
+    const sortDropdown = menuContent.querySelector('#bot-browser-collections-sort');
+    if (sortDropdown) {
+        const trigger = sortDropdown.querySelector('.bot-browser-multi-select-trigger');
+        const dropdown = sortDropdown.querySelector('.bot-browser-multi-select-dropdown');
+        const options = sortDropdown.querySelectorAll('.bot-browser-multi-select-option');
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            dropdown.classList.toggle('open');
+        });
+
+        options.forEach(option => {
+            option.addEventListener('click', async (e) => {
+                e.stopPropagation();
+                const newSort = option.dataset.value;
+
+                if (newSort === collectionsState.sort) {
+                    dropdown.classList.remove('open');
+                    return;
+                }
+
+                // Update UI
+                options.forEach(o => o.classList.remove('selected'));
+                option.classList.add('selected');
+                trigger.querySelector('.selected-text').textContent = option.querySelector('span').textContent;
+                dropdown.classList.remove('open');
+
+                // Reload with new sort
+                try {
+                    toastr.info('Reloading...', '', { timeOut: 1000 });
+                    const newData = await fetchJannyCollections({
+                        page: 1,
+                        sort: newSort
+                    });
+
+                    collectionsState.collections = newData.collections;
+                    collectionsState.pagination = newData.pagination;
+                    collectionsState.sort = newSort;
+                    collectionsState.currentPage = 1;
+
+                    renderCollectionsPage(menuContent);
+                } catch (error) {
+                    console.error('[Bot Browser] Error changing sort:', error);
+                    toastr.error('Failed to reload: ' + error.message);
+                }
+            });
+        });
+
+        // Close dropdown when clicking outside
+        document.addEventListener('click', () => {
+            dropdown.classList.remove('open');
+        });
+    }
+}
+
 // Setup source buttons
 function setupSourceButtons(menu) {
     const sourceButtons = menu.querySelectorAll('.bot-browser-source');
@@ -283,26 +647,114 @@ function setupSourceButtons(menu) {
 
             console.log(`[Bot Browser] Loading source: ${sourceName}`);
 
+            // Check if live Chub API is enabled
+            const useLiveChubApi = extension_settings[extensionName].useChubLiveApi !== false;
+
             try {
                 let cards = [];
 
                 if (sourceName === 'all') {
                     toastr.info('Loading all cards...', '', { timeOut: 2000 });
-                    const serviceNames = ['anchorhold', 'catbox', 'character_tavern', 'chub', 'nyai_me', 'risuai_realm', 'webring', 'mlpchag', 'desuarchive'];
 
-                    for (const service of serviceNames) {
-                        const serviceCards = await loadServiceIndex(service);
-                        const cardsWithSource = serviceCards.map(card => ({
-                            ...card,
-                            sourceService: service
-                        }));
-                        cards = cards.concat(cardsWithSource);
+                    // Services that use static archives (can be aggregated)
+                    // Exclude Chub if live API is enabled, and always exclude JannyAI (always live)
+                    const staticServices = ['anchorhold', 'catbox', 'character_tavern', 'nyai_me', 'risuai_realm', 'webring', 'mlpchag', 'desuarchive'];
+
+                    // Add Chub only if using archive mode (not live API)
+                    if (!useLiveChubApi) {
+                        staticServices.push('chub');
                     }
 
-                    console.log(`[Bot Browser] Loaded ${cards.length} cards from all sources`);
+                    // Show warning about excluded live API services
+                    const excludedServices = [];
+                    if (useLiveChubApi) excludedServices.push('Chub');
+                    excludedServices.push('JannyAI'); // Always excluded (always live)
+
+                    if (excludedServices.length > 0) {
+                        toastr.warning(
+                            `${excludedServices.join(' & ')} excluded (requires live API). Search them individually for full results.`,
+                            'Some sources excluded',
+                            { timeOut: 5000 }
+                        );
+                    }
+
+                    // Load all static services in parallel for better performance
+                    const servicePromises = staticServices.map(service => {
+                        return loadServiceIndex(service, false).then(serviceCards =>
+                            serviceCards.map(card => ({
+                                ...card,
+                                sourceService: service
+                            }))
+                        );
+                    });
+
+                    const allServiceCards = await Promise.all(servicePromises);
+                    cards = allServiceCards.flat();
+
+                    console.log(`[Bot Browser] Loaded ${cards.length} cards from ${staticServices.length} static sources`);
+                } else if (sourceName === 'jannyai') {
+                    // JannyAI uses its own live API
+                    toastr.info('Loading JannyAI...', '', { timeOut: 2000 });
+
+                    const persistedSearch = loadPersistentSearch(extensionName, extension_settings, sourceName);
+                    const sortBy = persistedSearch?.sortBy || extension_settings[extensionName].defaultSortBy || 'relevance';
+
+                    // Map sort options to JannyAI format
+                    let jannySort = 'createdAtStamp:desc';
+                    switch (sortBy) {
+                        case 'date_desc': jannySort = 'createdAtStamp:desc'; break;
+                        case 'date_asc': jannySort = 'createdAtStamp:asc'; break;
+                        case 'tokens_desc': jannySort = 'totalToken:desc'; break;
+                        case 'tokens_asc': jannySort = 'totalToken:asc'; break;
+                        default: jannySort = 'createdAtStamp:desc';
+                    }
+
+                    const searchResults = await searchJannyCharacters({
+                        search: persistedSearch?.filters?.search || '',
+                        page: 1,
+                        limit: 40,
+                        sort: jannySort
+                    });
+
+                    // Transform results to card format
+                    const results = searchResults.results?.[0] || {};
+                    cards = (results.hits || []).map(hit => transformJannyCard(hit));
+
+                    console.log(`[Bot Browser] Loaded ${cards.length} JannyAI cards`);
+                } else if (sourceName === 'jannyai_collections') {
+                    // JannyAI Collections - browse user-created collections
+                    toastr.info('Loading JannyAI Collections...', '', { timeOut: 2000 });
+
+                    const collectionsData = await fetchJannyCollections({
+                        page: 1,
+                        sort: 'popular'
+                    });
+
+                    console.log(`[Bot Browser] Loaded ${collectionsData.collections.length} JannyAI collections`);
+
+                    // Create collections browser instead of card browser
+                    createCollectionsBrowser(collectionsData, menu);
+                    return; // Don't call createCardBrowser
                 } else {
                     toastr.info(`Loading ${sourceName}...`, '', { timeOut: 2000 });
-                    cards = await loadServiceIndex(sourceName);
+                    // Use live API for chub and chub_lorebooks if enabled
+                    const isChubService = sourceName === 'chub' || sourceName === 'chub_lorebooks';
+                    const useLive = isChubService ? useLiveChubApi : false;
+
+                    // For live Chub/lorebooks, pass persisted filters to API (including advanced filters)
+                    let loadOptions = {};
+                    if (isChubService && useLive) {
+                        const persistedSearch = loadPersistentSearch(extensionName, extension_settings, sourceName);
+                        const sortBy = persistedSearch?.sortBy || extension_settings[extensionName].defaultSortBy || 'relevance';
+                        loadOptions = {
+                            sort: sortBy,
+                            search: persistedSearch?.filters?.search || '',
+                            hideNsfw: extension_settings[extensionName].hideNsfw,
+                            ...(persistedSearch?.advancedFilters || {})
+                        };
+                    }
+
+                    cards = await loadServiceIndex(sourceName, useLive, loadOptions);
                 }
 
                 createCardBrowser(sourceName, cards, state, extensionName, extension_settings, showCardDetailWrapper);
@@ -358,7 +810,7 @@ function setupBottomButtons(menu) {
 
 // Play service roulette animation and select random card
 async function playServiceRoulette(menu) {
-    const serviceNames = ['risuai_realm', 'webring', 'nyai_me', 'chub', 'character_tavern', 'catbox', 'anchorhold', 'mlpchag', 'desuarchive'];
+    const serviceNames = ['risuai_realm', 'webring', 'nyai_me', 'chub', 'character_tavern', 'catbox', 'anchorhold', 'mlpchag', 'desuarchive', 'jannyai'];
     const serviceButtons = menu.querySelectorAll('.bot-browser-source[data-source]');
 
     // Filter out the "all" button and lorebook buttons
@@ -404,7 +856,22 @@ async function playServiceRoulette(menu) {
 
                     // Load a random card from the selected service
                     try {
-                        const cards = await loadServiceIndex(selectedService);
+                        let cards;
+
+                        // Special handling for JannyAI - use live API
+                        if (selectedService === 'jannyai') {
+                            const searchResults = await searchJannyCharacters({
+                                search: '',
+                                page: Math.floor(Math.random() * 10) + 1, // Random page 1-10
+                                limit: 40,
+                                sort: 'createdAtStamp:desc'
+                            });
+                            const results = searchResults.results?.[0] || {};
+                            cards = (results.hits || []).map(hit => transformJannyCard(hit));
+                        } else {
+                            cards = await loadServiceIndex(selectedService);
+                        }
+
                         const randomCard = await getRandomCard(selectedService, cards, loadServiceIndex);
 
                         if (randomCard) {
@@ -436,113 +903,159 @@ async function playServiceRoulette(menu) {
 
 // Show settings modal
 function showSettingsModal() {
-    const settingsOverlay = document.createElement('div');
-    settingsOverlay.id = 'bot-browser-settings-overlay';
-    settingsOverlay.className = 'bot-browser-detail-overlay';
-
-    const settingsModal = document.createElement('div');
-    settingsModal.id = 'bot-browser-settings-modal';
-    settingsModal.className = 'bot-browser-detail-modal';
-
     const settings = extension_settings[extensionName];
 
-    settingsModal.innerHTML = `
-        <div class="bot-browser-detail-header">
-            <h2><i class="fa-solid fa-gear"></i> Bot Browser Settings</h2>
-            <button class="bot-browser-detail-close">
-                <i class="fa-solid fa-times"></i>
-            </button>
-        </div>
-
-        <div class="bot-browser-detail-content" style="padding: 30px;">
-            <div class="bot-browser-settings-section">
-                <h3>Recently Viewed Cards</h3>
-
-                <label class="checkbox_label">
-                    <input type="checkbox" id="bb-setting-recently-viewed" ${settings.recentlyViewedEnabled ? 'checked' : ''}>
-                    <span>Enable Recently Viewed Tracking</span>
-                </label>
-
-                <div class="bot-browser-setting-group">
-                    <label for="bb-setting-max-recent">Max Recently Viewed Cards: <span id="bb-max-recent-value">${settings.maxRecentlyViewed}</span></label>
-                    <input type="range" id="bb-setting-max-recent" min="5" max="20" value="${settings.maxRecentlyViewed}" class="bot-browser-slider">
+    // Create a completely new modal structure with dedicated classes
+    const modalHTML = `
+        <div id="bb-settings-backdrop" class="bb-settings-backdrop">
+            <div id="bb-settings-panel" class="bb-settings-panel">
+                <div class="bb-settings-header">
+                    <h2><i class="fa-solid fa-gear"></i> Settings</h2>
+                    <button class="bb-settings-close-btn" id="bb-settings-close">
+                        <i class="fa-solid fa-times"></i>
+                    </button>
                 </div>
 
-                <button id="bb-clear-recent" class="bot-browser-action-button">
-                    <i class="fa-solid fa-trash"></i> Clear Recently Viewed
-                </button>
-            </div>
-
-            <div class="bot-browser-settings-section">
-                <h3>Search & Filters</h3>
-
-                <label class="checkbox_label">
-                    <input type="checkbox" id="bb-setting-persistent-search" ${settings.persistentSearchEnabled ? 'checked' : ''}>
-                    <span>Remember Last Search & Filters</span>
-                </label>
-
-                <div class="bot-browser-setting-group">
-                    <label for="bb-setting-default-sort">Default Sort Option:</label>
-                    <select id="bb-setting-default-sort" class="text_pole">
-                        <option value="relevance" ${settings.defaultSortBy === 'relevance' ? 'selected' : ''}>Relevance</option>
-                        <option value="name_asc" ${settings.defaultSortBy === 'name_asc' ? 'selected' : ''}>Name (A-Z)</option>
-                        <option value="name_desc" ${settings.defaultSortBy === 'name_desc' ? 'selected' : ''}>Name (Z-A)</option>
-                        <option value="creator_asc" ${settings.defaultSortBy === 'creator_asc' ? 'selected' : ''}>Creator (A-Z)</option>
-                        <option value="creator_desc" ${settings.defaultSortBy === 'creator_desc' ? 'selected' : ''}>Creator (Z-A)</option>
-                    </select>
+                <div class="bb-settings-tabs">
+                    <button class="bb-settings-tab active" data-tab="filtering">
+                        <i class="fa-solid fa-filter"></i> <span>Filtering</span>
+                    </button>
+                    <button class="bb-settings-tab" data-tab="display">
+                        <i class="fa-solid fa-eye"></i> <span>Display</span>
+                    </button>
+                    <button class="bb-settings-tab" data-tab="search">
+                        <i class="fa-solid fa-magnifying-glass"></i> <span>Search</span>
+                    </button>
+                    <button class="bb-settings-tab" data-tab="api">
+                        <i class="fa-solid fa-cloud"></i> <span>API</span>
+                    </button>
                 </div>
 
-                <div class="bot-browser-setting-group">
-                    <label for="bb-setting-threshold">Fuzzy Search Strictness: <span id="bb-threshold-value">${(settings.fuzzySearchThreshold * 100).toFixed(0)}%</span></label>
-                    <input type="range" id="bb-setting-threshold" min="0" max="100" value="${settings.fuzzySearchThreshold * 100}" class="bot-browser-slider">
-                    <small style="color: rgba(255,255,255,0.6);">Lower = stricter matching, Higher = more lenient</small>
+                <div class="bb-settings-body">
+                    <!-- FILTERING TAB -->
+                    <div class="bb-settings-tab-content active" data-content="filtering">
+                        <div class="bb-setting-group">
+                            <label><i class="fa-solid fa-ban"></i> Tag Blocklist</label>
+                            <textarea id="bb-setting-tag-blocklist" rows="5" placeholder="Enter tags or terms to block, one per line...">${(settings.tagBlocklist || []).join('\n')}</textarea>
+                            <small>Cards with these tags/terms will be hidden. One per line.</small>
+                        </div>
+
+                        <div class="bb-setting-group">
+                            <label class="bb-checkbox">
+                                <input type="checkbox" id="bb-setting-hide-nsfw" ${settings.hideNsfw ? 'checked' : ''}>
+                                <span>Hide NSFW Cards</span>
+                            </label>
+                            <small>Completely hide cards marked as possibly NSFW.</small>
+                        </div>
+
+                        <div class="bb-setting-note">
+                            <i class="fa-solid fa-triangle-exclamation"></i>
+                            <span>NSFW detection is not 100% accurate.</span>
+                        </div>
+                    </div>
+
+                    <!-- DISPLAY TAB -->
+                    <div class="bb-settings-tab-content" data-content="display">
+                        <div class="bb-setting-group">
+                            <label class="bb-checkbox">
+                                <input type="checkbox" id="bb-setting-blur-cards" ${settings.blurCards ? 'checked' : ''}>
+                                <span>Blur All Card Images</span>
+                            </label>
+                        </div>
+
+                        <div class="bb-setting-group">
+                            <label class="bb-checkbox">
+                                <input type="checkbox" id="bb-setting-blur-nsfw" ${settings.blurNsfw ? 'checked' : ''}>
+                                <span>Blur NSFW Card Images</span>
+                            </label>
+                        </div>
+
+                        <div class="bb-setting-group">
+                            <label>Cards Per Page: <span id="bb-cards-per-page-value">${settings.cardsPerPage}</span></label>
+                            <input type="range" id="bb-setting-cards-per-page" min="50" max="500" step="50" value="${settings.cardsPerPage}">
+                        </div>
+
+                        <div class="bb-setting-group">
+                            <label class="bb-checkbox">
+                                <input type="checkbox" id="bb-setting-recently-viewed" ${settings.recentlyViewedEnabled ? 'checked' : ''}>
+                                <span>Show Recently Viewed</span>
+                            </label>
+                        </div>
+
+                        <div class="bb-setting-group">
+                            <label>Max Recent Cards: <span id="bb-max-recent-value">${settings.maxRecentlyViewed}</span></label>
+                            <input type="range" id="bb-setting-max-recent" min="5" max="20" value="${settings.maxRecentlyViewed}">
+                        </div>
+
+                        <button id="bb-clear-recent" class="bb-setting-action-btn danger">
+                            <i class="fa-solid fa-trash"></i> Clear Recently Viewed
+                        </button>
+                    </div>
+
+                    <!-- SEARCH TAB -->
+                    <div class="bb-settings-tab-content" data-content="search">
+                        <div class="bb-setting-group">
+                            <label class="bb-checkbox">
+                                <input type="checkbox" id="bb-setting-persistent-search" ${settings.persistentSearchEnabled ? 'checked' : ''}>
+                                <span>Remember Last Search</span>
+                            </label>
+                        </div>
+
+                        <div class="bb-setting-group">
+                            <label>Default Sort:</label>
+                            <select id="bb-setting-default-sort">
+                                <option value="relevance" ${settings.defaultSortBy === 'relevance' ? 'selected' : ''}>Relevance</option>
+                                <option value="date_desc" ${settings.defaultSortBy === 'date_desc' ? 'selected' : ''}>Newest First</option>
+                                <option value="date_asc" ${settings.defaultSortBy === 'date_asc' ? 'selected' : ''}>Oldest First</option>
+                                <option value="name_asc" ${settings.defaultSortBy === 'name_asc' ? 'selected' : ''}>Name (A-Z)</option>
+                                <option value="name_desc" ${settings.defaultSortBy === 'name_desc' ? 'selected' : ''}>Name (Z-A)</option>
+                                <option value="tokens_desc" ${settings.defaultSortBy === 'tokens_desc' ? 'selected' : ''}>Most Tokens</option>
+                                <option value="tokens_asc" ${settings.defaultSortBy === 'tokens_asc' ? 'selected' : ''}>Least Tokens</option>
+                            </select>
+                        </div>
+
+                        <div class="bb-setting-group">
+                            <label>Fuzzy Search Tolerance: <span id="bb-threshold-value">${(settings.fuzzySearchThreshold * 100).toFixed(0)}%</span></label>
+                            <input type="range" id="bb-setting-threshold" min="0" max="100" value="${settings.fuzzySearchThreshold * 100}">
+                            <small>Lower = exact matches, Higher = allow typos</small>
+                        </div>
+
+                        <button id="bb-clear-search" class="bb-setting-action-btn danger">
+                            <i class="fa-solid fa-eraser"></i> Clear Search History
+                        </button>
+                    </div>
+
+                    <!-- API TAB -->
+                    <div class="bb-settings-tab-content" data-content="api">
+                        <div class="bb-setting-group" style="text-align: center;">
+                            <div style="display: inline-block; background: white; border-radius: 8px; padding: 8px 12px; margin-bottom: 10px;">
+                                <img src="https://avatars.charhub.io/icons/assets/full_logo.png" alt="Chub" style="height: 28px;">
+                            </div>
+                            <label class="bb-checkbox" style="justify-content: center;">
+                                <input type="checkbox" id="bb-setting-chub-live-api" ${settings.useChubLiveApi !== false ? 'checked' : ''}>
+                                <span>Use Live Chub API</span>
+                            </label>
+                        </div>
+
+                        <div class="bb-api-options">
+                            <div class="bb-api-option live">
+                                <i class="fa-solid fa-bolt"></i>
+                                <strong>Live API</strong>
+                                <small>Latest cards with advanced filters</small>
+                            </div>
+                            <div class="bb-api-option archive">
+                                <i class="fa-solid fa-archive"></i>
+                                <strong>Archive</strong>
+                                <small>Static index, works if Chub goes down</small>
+                            </div>
+                        </div>
+                    </div>
                 </div>
 
-                <div class="bot-browser-setting-group">
-                    <label for="bb-setting-cards-per-page">Cards Per Page: <span id="bb-cards-per-page-value">${settings.cardsPerPage}</span></label>
-                    <input type="range" id="bb-setting-cards-per-page" min="50" max="500" step="50" value="${settings.cardsPerPage}" class="bot-browser-slider">
-                    <small style="color: rgba(255,255,255,0.6);">Number of cards to display on each page. Lower = faster loading, Higher = less page switching</small>
-                </div>
-
-                <button id="bb-clear-search" class="bot-browser-action-button">
-                    <i class="fa-solid fa-eraser"></i> Clear Search History
-                </button>
-            </div>
-
-            <div class="bot-browser-settings-section">
-                <h3>Display & Privacy</h3>
-
-                <label class="checkbox_label">
-                    <input type="checkbox" id="bb-setting-blur-cards" ${settings.blurCards ? 'checked' : ''}>
-                    <span>Blur All Card Images</span>
-                </label>
-                <small style="color: rgba(255,255,255,0.6); display: block; margin-top: 5px; margin-left: 28px;">Hide card images for privacy. Images remain blurred until clicked.</small>
-
-                <label class="checkbox_label" style="margin-top: 15px;">
-                    <input type="checkbox" id="bb-setting-blur-nsfw" ${settings.blurNsfw ? 'checked' : ''}>
-                    <span>Blur NSFW Card Images</span>
-                </label>
-                <small style="color: rgba(255,255,255,0.6); display: block; margin-top: 5px; margin-left: 28px;">Blur only cards marked as possibly NSFW. Images remain blurred until clicked.</small>
-
-                <label class="checkbox_label" style="margin-top: 15px;">
-                    <input type="checkbox" id="bb-setting-hide-nsfw" ${settings.hideNsfw ? 'checked' : ''}>
-                    <span>Hide NSFW Cards</span>
-                </label>
-                <small style="color: rgba(255,255,255,0.6); display: block; margin-top: 5px; margin-left: 28px;">Completely hide cards marked as possibly NSFW from results.</small>
-
-                <div style="margin-top: 15px; padding: 10px; background: rgba(255, 150, 50, 0.1); border: 1px solid rgba(255, 150, 50, 0.3); border-radius: 6px;">
-                    <small style="color: rgba(255, 200, 100, 0.9); display: block; line-height: 1.4;">
-                        <i class="fa-solid fa-triangle-exclamation" style="margin-right: 5px;"></i>
-                        <strong>Note:</strong> NSFW detection is not 100% accurate. Some NSFW content may still appear, and some SFW content may be incorrectly flagged.
-                    </small>
-                </div>
-
-                <div style="margin-top: 20px;">
-                    <label for="bb-setting-tag-blocklist" style="display: block; margin-bottom: 8px; color: rgba(255, 255, 255, 0.9); font-weight: 500;">
-                        <i class="fa-solid fa-ban"></i> Tag Blocklist
-                    </label>
-                    <textarea id="bb-setting-tag-blocklist" class="text_pole" rows="4" style="width: 100%; resize: vertical; font-family: monospace; font-size: 0.9em;" placeholder="Enter tags or terms to block, one per line">${(settings.tagBlocklist || []).join('\n')}</textarea>
-                    <small style="color: rgba(255,255,255,0.6); display: block; margin-top: 5px;">Cards with these tags or terms in their name/description will be hidden. Enter one term per line (case-insensitive).</small>
+                <div class="bb-settings-footer">
+                    <button id="bb-settings-save" class="bb-settings-save-btn">
+                        <i class="fa-solid fa-save"></i> Save Settings
+                    </button>
                 </div>
             </div>
 
@@ -562,77 +1075,52 @@ function showSettingsModal() {
                 </div>
             </div>
         </div>
-
-        <div class="bot-browser-detail-actions">
-            <button class="bot-browser-settings-save">
-                <i class="fa-solid fa-save"></i> Save Settings
-            </button>
-        </div>
     `;
 
-    document.body.appendChild(settingsOverlay);
-    document.body.appendChild(settingsModal);
+    // Insert into body
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
 
-    // Event listeners - comprehensive click prevention
-    const closeButton = settingsModal.querySelector('.bot-browser-detail-close');
-    closeButton.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        e.preventDefault();
-        closeSettingsModal();
+    const backdrop = document.getElementById('bb-settings-backdrop');
+    const panel = document.getElementById('bb-settings-panel');
+
+    // Tab switching
+    const tabs = panel.querySelectorAll('.bb-settings-tab');
+    const contents = panel.querySelectorAll('.bb-settings-tab-content');
+
+    tabs.forEach(tab => {
+        tab.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const tabName = tab.dataset.tab;
+
+            tabs.forEach(t => t.classList.remove('active'));
+            tab.classList.add('active');
+
+            contents.forEach(content => {
+                content.classList.toggle('active', content.dataset.content === tabName);
+            });
+        });
     });
 
-    settingsOverlay.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-        e.preventDefault();
-        closeSettingsModal();
+    // Close handlers
+    document.getElementById('bb-settings-close').addEventListener('click', closeSettingsModal);
+    backdrop.addEventListener('click', (e) => {
+        if (e.target === backdrop) closeSettingsModal();
     });
 
-    // Prevent all events from bubbling through the overlay
-    settingsOverlay.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-    });
-
-    settingsOverlay.addEventListener('mouseup', (e) => {
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-    });
-
-    // Prevent modal clicks from closing it
-    settingsModal.addEventListener('click', (e) => {
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-    });
-
-    settingsModal.addEventListener('mousedown', (e) => {
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-    });
-
-    settingsModal.addEventListener('mouseup', (e) => {
-        e.stopPropagation();
-        e.stopImmediatePropagation();
-    });
+    // Prevent panel clicks from closing
+    panel.addEventListener('click', (e) => e.stopPropagation());
 
     // Range sliders
-    const maxRecentSlider = document.getElementById('bb-setting-max-recent');
-    const maxRecentValue = document.getElementById('bb-max-recent-value');
-    maxRecentSlider.addEventListener('input', (e) => {
-        maxRecentValue.textContent = e.target.value;
+    document.getElementById('bb-setting-max-recent').addEventListener('input', (e) => {
+        document.getElementById('bb-max-recent-value').textContent = e.target.value;
     });
 
-    const thresholdSlider = document.getElementById('bb-setting-threshold');
-    const thresholdValue = document.getElementById('bb-threshold-value');
-    thresholdSlider.addEventListener('input', (e) => {
-        thresholdValue.textContent = e.target.value + '%';
+    document.getElementById('bb-setting-threshold').addEventListener('input', (e) => {
+        document.getElementById('bb-threshold-value').textContent = e.target.value + '%';
     });
 
-    const cardsPerPageSlider = document.getElementById('bb-setting-cards-per-page');
-    const cardsPerPageValue = document.getElementById('bb-cards-per-page-value');
-    cardsPerPageSlider.addEventListener('input', (e) => {
-        cardsPerPageValue.textContent = e.target.value;
+    document.getElementById('bb-setting-cards-per-page').addEventListener('input', (e) => {
+        document.getElementById('bb-cards-per-page-value').textContent = e.target.value;
     });
 
     // Clear buttons
@@ -654,8 +1142,7 @@ function showSettingsModal() {
     });
 
     // Save button
-    const saveButton = settingsModal.querySelector('.bot-browser-settings-save');
-    saveButton.addEventListener('click', () => {
+    document.getElementById('bb-settings-save').addEventListener('click', () => {
         settings.recentlyViewedEnabled = document.getElementById('bb-setting-recently-viewed').checked;
         settings.maxRecentlyViewed = parseInt(document.getElementById('bb-setting-max-recent').value);
         settings.persistentSearchEnabled = document.getElementById('bb-setting-persistent-search').checked;
@@ -666,12 +1153,9 @@ function showSettingsModal() {
         settings.blurNsfw = document.getElementById('bb-setting-blur-nsfw').checked;
         settings.hideNsfw = document.getElementById('bb-setting-hide-nsfw').checked;
 
-        // Parse tag blocklist from textarea (split by newlines, trim, filter empty)
         const blocklistText = document.getElementById('bb-setting-tag-blocklist').value;
-        settings.tagBlocklist = blocklistText
-            .split('\n')
-            .map(line => line.trim())
-            .filter(line => line.length > 0);
+        settings.tagBlocklist = blocklistText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
+        settings.useChubLiveApi = document.getElementById('bb-setting-chub-live-api').checked;
 
         // QuillGen settings
         const oldApiKey = settings.quillgenApiKey;
@@ -704,12 +1188,8 @@ function showSettingsModal() {
 
 // Close settings modal
 function closeSettingsModal() {
-    const modal = document.getElementById('bot-browser-settings-modal');
-    const overlay = document.getElementById('bot-browser-settings-overlay');
-
-    if (modal) modal.remove();
-    if (overlay) overlay.remove();
-
+    const backdrop = document.getElementById('bb-settings-backdrop');
+    if (backdrop) backdrop.remove();
     console.log('[Bot Browser] Settings modal closed');
 }
 
@@ -1024,6 +1504,10 @@ function closeBotBrowserMenu() {
     if (menu.dialogObserver) {
         menu.dialogObserver.disconnect();
     }
+
+    // Reset collections state when menu is closed
+    collectionsState.viewingCollectionCharacters = false;
+    collectionsState.lastCollectionData = null;
 
     menu.classList.add('closing');
     overlay.classList.add('closing');

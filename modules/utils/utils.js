@@ -1,6 +1,3 @@
-// Utility functions for Bot Browser extension
-
-// Debounce helper function
 export function debounce(func, wait) {
     let timeout;
     return function executedFunction(...args) {
@@ -13,28 +10,22 @@ export function debounce(func, wait) {
     };
 }
 
-// Helper function to decode UTF-8 escape sequences (fixes Korean text)
 export function decodeUTF8(text) {
     if (!text) return '';
     try {
-        // Fix double-encoded UTF-8
         if (text.includes('\\x')) {
-            // Convert \xXX sequences to actual bytes
             text = text.replace(/\\x([0-9A-Fa-f]{2})/g, (match, hex) => {
                 return String.fromCharCode(parseInt(hex, 16));
             });
         }
-        // Try to decode as UTF-8
         return decodeURIComponent(escape(text));
     } catch (e) {
         return text;
     }
 }
 
-// Helper function to safely escape HTML (prevents XSS)
 export function escapeHTML(text) {
     if (!text) return '';
-    // First decode UTF-8 sequences
     text = decodeUTF8(text);
     return text
         .replace(/&/g, '&amp;')
@@ -44,38 +35,70 @@ export function escapeHTML(text) {
         .replace(/'/g, '&#039;');
 }
 
-// CORS proxy rotation for character_tavern images
 const CORS_PROXIES = [
     'https://corsproxy.io/?',
     'https://api.cors.lol/?url='
 ];
 
-// Get a random CORS proxy
 export function getRandomCorsProxy() {
     return CORS_PROXIES[Math.floor(Math.random() * CORS_PROXIES.length)];
 }
 
-// Helper function to sanitize image URLs (prevents attribute injection)
 export function sanitizeImageUrl(url) {
     if (!url) return '';
     let trimmed = url.trim();
 
-    // Only allow http:// and https:// URLs
     if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
-        // Rotate CORS proxy for character_tavern images to spread load
         if (trimmed.includes('corsproxy.io')) {
-            // Extract the actual URL after the proxy
             const afterProxy = trimmed.split('corsproxy.io/?')[1];
             if (afterProxy) {
-                // Remove url= prefix to get the actual target URL
                 const actualUrl = afterProxy.replace(/^url=/, '');
-                // Use a random proxy instead
                 trimmed = getRandomCorsProxy() + actualUrl;
             }
         }
-
-        // Escape HTML entities to prevent attribute injection
         return escapeHTML(trimmed);
     }
     return '';
+}
+
+export function safeString(val) {
+    if (val === null || val === undefined) return '';
+    if (typeof val === 'string') return val;
+    if (Array.isArray(val)) return val.join(', ');
+    return String(val);
+}
+
+export function safeKeywords(kw) {
+    if (!kw) return [];
+    if (typeof kw === 'string') return [kw];
+    if (Array.isArray(kw)) return kw.map(k => safeString(k));
+    return [];
+}
+
+export function extractCardProperties(fullCard) {
+    const tags = fullCard.tags || [];
+    const alternateGreetings = fullCard.alternate_greetings || [];
+    const exampleMessages = fullCard.example_messages || fullCard.mes_example || '';
+
+    let imageUrl = fullCard.avatar_url || fullCard.image_url || '';
+    if (imageUrl.includes('realm.risuai.net') && fullCard.avatar_url) {
+        imageUrl = fullCard.avatar_url;
+    }
+
+    return {
+        imageUrl,
+        tags,
+        alternateGreetings,
+        exampleMessages,
+        metadata: fullCard.metadata || null,
+        id: fullCard.id || null,
+        service: fullCard.service || null,
+        possibleNsfw: fullCard.possibleNsfw || false
+    };
+}
+
+export function getLorebookInfo(fullCard, isLorebook) {
+    const entries = fullCard.entries || null;
+    const entriesCount = isLorebook && entries ? Object.keys(entries).length : 0;
+    return { entries, entriesCount };
 }
