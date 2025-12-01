@@ -1,4 +1,5 @@
 import { default_avatar } from '../../../../../../script.js';
+import { loadQuillgenIndex } from './quillgenApi.js';
 
 const baseUrl = 'https://raw.githubusercontent.com/mia13165/updated_cards/refs/heads/main';
 
@@ -234,6 +235,17 @@ export async function loadMoreChubLorebooks(options = {}) {
 }
 
 export async function loadServiceIndex(serviceName, useLiveApi = false, options = {}) {
+    // Handle QuillGen specially - it uses API-based loading
+    if (serviceName === 'quillgen') {
+        // Return cached data if available
+        if (loadedData.serviceIndexes['quillgen'] && loadedData.serviceIndexes['quillgen'].length > 0) {
+            return loadedData.serviceIndexes['quillgen'];
+        }
+        const cards = await loadQuillgenIndex();
+        loadedData.serviceIndexes['quillgen'] = cards;
+        return cards;
+    }
+
     // For chub_lorebooks with live API enabled, fetch from Gateway API
     if (serviceName === 'chub_lorebooks' && useLiveApi) {
         resetChubLorebooksApiState();
@@ -303,6 +315,13 @@ export async function loadServiceIndex(serviceName, useLiveApi = false, options 
         loadedData.serviceIndexes[serviceName] = [];
         return [];
     }
+}
+
+/**
+ * Clear QuillGen cache to force reload on next access.
+ */
+export function clearQuillgenCache() {
+    loadedData.serviceIndexes['quillgen'] = null;
 }
 
 export async function loadCardChunk(service, chunkFile) {

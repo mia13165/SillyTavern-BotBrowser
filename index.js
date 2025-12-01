@@ -4,7 +4,7 @@ import { eventSource, event_types, saveSettingsDebounced, processDroppedFiles, g
 // Import modules
 import { loadImportStats, saveImportStats, loadRecentlyViewed, loadPersistentSearch, loadBookmarks, removeBookmark } from './modules/storage/storage.js';
 import { getTimeAgo } from './modules/storage/stats.js';
-import { loadServiceIndex, initializeServiceCache } from './modules/services/cache.js';
+import { loadServiceIndex, initializeServiceCache, clearQuillgenCache } from './modules/services/cache.js';
 import { getRandomCard } from './modules/services/cards.js';
 import { importCardToSillyTavern } from './modules/services/import.js';
 import { showCardDetail, closeDetailModal, showImageLightbox } from './modules/modals/detail.js';
@@ -51,6 +51,7 @@ const defaultSettings = {
     hideNsfw: false,
     trackStats: true,
     tagBlocklist: [],
+    quillgenApiKey: '',
     useChubLiveApi: true
 };
 
@@ -1048,6 +1049,29 @@ function showSettingsModal() {
                                 <small>Static index, works if Chub goes down</small>
                             </div>
                         </div>
+
+                        <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
+
+                        <div class="bb-setting-group" style="text-align: center;">
+                            <div style="display: inline-block; background: linear-gradient(135deg, #1a1a2e, #16213e); border-radius: 8px; padding: 8px 12px; margin-bottom: 10px;">
+                                <img src="https://quillgen.app/logo-dark.png" alt="QuillGen" style="height: 32px; display: block;">
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <strong style="color: rgba(255,255,255,0.9);">QuillGen</strong>
+                            </div>
+                            <small style="color: rgba(255,255,255,0.6); display: block; margin-bottom: 15px;">
+                                Browse public characters from QuillGen. Add your API key to also see your own characters.
+                                <a href="https://quillgen.app" target="_blank" style="color: rgba(100, 150, 255, 0.9);">Get your API key →</a>
+                            </small>
+                        </div>
+
+                        <div class="bb-setting-group">
+                            <label for="bb-setting-quillgen-key">QuillGen API Key (optional):</label>
+                            <input type="password" id="bb-setting-quillgen-key" class="text_pole" 
+                                   placeholder="sk_..." 
+                                   value="${settings.quillgenApiKey || ''}"
+                                   style="width: 100%; font-family: monospace;">
+                        </div>
                     </div>
                 </div>
 
@@ -1139,6 +1163,15 @@ function showSettingsModal() {
         const blocklistText = document.getElementById('bb-setting-tag-blocklist').value;
         settings.tagBlocklist = blocklistText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
         settings.useChubLiveApi = document.getElementById('bb-setting-chub-live-api').checked;
+
+        // QuillGen settings
+        const oldApiKey = settings.quillgenApiKey;
+        settings.quillgenApiKey = document.getElementById('bb-setting-quillgen-key').value.trim();
+
+        // Clear QuillGen cache if settings changed
+        if (oldApiKey !== settings.quillgenApiKey) {
+            clearQuillgenCache();
+        }
 
         saveSettingsDebounced();
         applyBlurSetting();

@@ -4,6 +4,7 @@ import { closeDetailModal } from '../modals/detail.js';
 import { importWorldInfo } from '../../../../../world-info.js';
 import { default_avatar } from '../../../../../../script.js';
 import { loadCardChunk } from '../services/cache.js';
+import { fetchQuillgenCard } from '../services/quillgenApi.js';
 
 // Import card to SillyTavern
 export async function importCardToSillyTavern(card, extensionName, extension_settings, importStats, getRequestHeaders, processDroppedFiles) {
@@ -135,8 +136,13 @@ async function importCharacter(card, extensionName, extension_settings, importSt
     let imageBlob;
     let use404Fallback = false;
 
+    // Handle QuillGen cards - use auth header if API key is configured
+    if (card.service === 'quillgen' || card.sourceService === 'quillgen') {
+        console.log('[Bot Browser] Detected QuillGen card');
+        imageBlob = await fetchQuillgenCard(card);
+    }
     // Check if this is a realm.risuai.net card - handle different formats
-    if (imageUrl.includes('realm.risuai.net')) {
+    else if (imageUrl.includes('realm.risuai.net')) {
         console.log('[Bot Browser] Detected realm.risuai.net URL');
         console.log('[Bot Browser] imageUrl:', imageUrl);
 

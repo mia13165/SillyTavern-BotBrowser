@@ -19,6 +19,7 @@ export function createCardHTML(card) {
 
     return `
         <div class="bot-browser-card-thumbnail" data-card-id="${card.id}" data-nsfw="${isNsfw}">
+            ${card.is_own ? '<div class="bot-browser-own-badge" title="Your character"><i class="fa-solid fa-user"></i></div>' : ''}
             <div class="bot-browser-card-image" style="background-image: url('${safeImageUrl}');">
                 ${!safeImageUrl ? '<i class="fa-solid fa-user"></i>' : ''}
             </div>
@@ -109,6 +110,14 @@ export function getOriginalMenuHTML(recentlyViewed) {
                 <button class="bot-browser-source" data-source="desuarchive">
                     <div class="bot-browser-source-icon" style="background-image: url('https://s2.vndb.org/ch/32/17032.jpg'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
                     <span>Desuarchive</span>
+                </button>
+                <button class="bot-browser-source" data-source="quillgen">
+                    <div class="bot-browser-source-icon" style="background: linear-gradient(135deg, #1a1a2e, #16213e); display: flex; align-items: center; justify-content: center;">
+                        <img src="https://quillgen.app/logo-dark.png"
+                             alt="QuillGen"
+                             style="max-width: 100%; max-height: 100%; display: block;">
+                    </div>
+                    <span>QuillGen.app</span>
                 </button>
                 <button class="bot-browser-source" data-source="jannyai">
                     <div class="bot-browser-source-icon" style="background-image: url('https://tse3.mm.bing.net/th/id/OIP.nb-qi0od9W6zRsskVwL6QAHaHa?rs=1&pid=ImgDetMain&o=7&rm=3'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>

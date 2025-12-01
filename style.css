@@ -977,6 +977,7 @@ body .bot-browser-detail-modal {
 }
 
 .bot-browser-card-thumbnail {
+    position: relative;
     background: rgba(0, 0, 0, 0.3);
     border: 1px solid rgba(255, 255, 255, 0.15);
     border-radius: 10px;
@@ -993,6 +994,27 @@ body .bot-browser-detail-modal {
     border-color: rgba(255, 255, 255, 0.3);
     transform: translateY(-2px);
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+}
+
+.bot-browser-own-badge {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: linear-gradient(135deg, rgba(100, 200, 100, 0.9), rgba(60, 180, 60, 0.9));
+    color: white;
+    padding: 4px 8px;
+    border-radius: 6px;
+    font-size: 0.7em;
+    font-weight: 600;
+    z-index: 2;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.3);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+}
+
+.bot-browser-own-badge i {
+    font-size: 0.9em;
 }
 
 .bot-browser-card-image {
