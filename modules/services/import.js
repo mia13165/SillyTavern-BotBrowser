@@ -149,7 +149,7 @@ async function importWyvernLorebook(card, extensionName, extension_settings, imp
 
 // Import character
 async function importCharacter(card, extensionName, extension_settings, importStats, processDroppedFiles, getRequestHeaders) {
-    // Handle live Chub cards - fetch full data from API first
+    // Handle live Chub cards - always fetch full data from API to avoid stale CDN cache
     if (card.isLiveChub && card.fullPath) {
         console.log('[Bot Browser] Importing live Chub card:', card.fullPath);
         try {
@@ -162,12 +162,6 @@ async function importCharacter(card, extensionName, extension_settings, importSt
                 const fullCharData = transformFullChubCharacter(fullData);
                 card = { ...card, ...fullCharData };
 
-                // If we have character_book from API, use dedicated import to ensure lorebook is embedded
-                if (fullCharData.character_book) {
-                    console.log('[Bot Browser] Card has embedded lorebook, using API-based import');
-                    return await importLiveChubCard(card, extensionName, extension_settings, importStats, processDroppedFiles);
-                }
-
                 // If no embedded lorebook but has related lorebooks, fetch the first one
                 if (!fullCharData.character_book && fullCharData.related_lorebooks && fullCharData.related_lorebooks.length > 0) {
                     const firstLorebookId = fullCharData.related_lorebooks[0];
@@ -179,15 +173,18 @@ async function importCharacter(card, extensionName, extension_settings, importSt
                             const lorebookName = fullData.nodes?.[firstLorebookId]?.name || 'Linked Lorebook';
                             card.character_book = convertWorldInfoToCharacterBook(lorebookData, lorebookName);
                             console.log('[Bot Browser] Fetched related lorebook:', lorebookName, 'with', card.character_book.entries?.length || 0, 'entries');
-                            return await importLiveChubCard(card, extensionName, extension_settings, importStats, processDroppedFiles);
                         }
                     } catch (lorebookError) {
                         console.warn('[Bot Browser] Failed to fetch related lorebook:', lorebookError.message);
                     }
                 }
+
+                // Always use API data for live Chub cards to avoid stale PNG cache
+                console.log('[Bot Browser] Using API-based import for fresh data');
+                return await importLiveChubCard(card, extensionName, extension_settings, importStats, processDroppedFiles);
             }
         } catch (error) {
-            console.warn('[Bot Browser] Failed to fetch full Chub data, using preview data:', error.message);
+            console.warn('[Bot Browser] Failed to fetch full Chub data, falling back to PNG:', error.message);
         }
     }
 
