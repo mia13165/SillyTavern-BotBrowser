@@ -17,7 +17,7 @@ export function loadPersistentSearch(extensionName, extension_settings, serviceN
 }
 
 // Save search state to localStorage (per-service)
-export function savePersistentSearch(extensionName, extension_settings, serviceName, filters, sortBy, advancedFilters = null, jannyAdvancedFilters = null) {
+export function savePersistentSearch(extensionName, extension_settings, serviceName, filters, sortBy, advancedFilters = null, jannyAdvancedFilters = null, ctAdvancedFilters = null, wyvernAdvancedFilters = null) {
     if (!extension_settings[extensionName].persistentSearchEnabled) {
         return;
     }
@@ -26,7 +26,9 @@ export function savePersistentSearch(extensionName, extension_settings, serviceN
             filters: filters,
             sortBy: sortBy,
             advancedFilters: advancedFilters,
-            jannyAdvancedFilters: jannyAdvancedFilters
+            jannyAdvancedFilters: jannyAdvancedFilters,
+            ctAdvancedFilters: ctAdvancedFilters,
+            wyvernAdvancedFilters: wyvernAdvancedFilters
         };
         const key = `botBrowser_lastSearch_${serviceName}`;
         localStorage.setItem(key, JSON.stringify(data));
@@ -91,7 +93,7 @@ export function addToRecentlyViewed(extensionName, extension_settings, recentlyV
         // Remove if already in list
         recentlyViewed = recentlyViewed.filter(c => c.id !== card.id);
 
-        // Add to front
+        // Add to front - save all relevant card data for offline viewing
         recentlyViewed.unshift({
             id: card.id,
             name: card.name,
@@ -109,7 +111,25 @@ export function addToRecentlyViewed(extensionName, extension_settings, recentlyV
             isLorebook: card.isLorebook || false,
             // JannyAI fields for fetching full data
             isJannyAI: card.isJannyAI || false,
-            slug: card.slug || null
+            slug: card.slug || null,
+            // Character Tavern fields
+            isCharacterTavern: card.isCharacterTavern || false,
+            // Wyvern fields
+            isWyvern: card.isWyvern || false,
+            // QuillGen fields
+            isQuillGen: card.service === 'quillgen' || card.sourceService === 'quillgen' || false,
+            // Character data fields (for services that embed data in search results)
+            description: card.description || card.tagline || card.summary || null,
+            personality: card.personality || null,
+            scenario: card.scenario || null,
+            first_message: card.first_message || card.first_mes || null,
+            mes_example: card.mes_example || null,
+            alternate_greetings: card.alternate_greetings || null,
+            tags: card.tags || null,
+            creator_notes: card.creator_notes || null,
+            nTokens: card.nTokens || card.token_count || null,
+            // Store full _rawData for import support
+            _rawData: card._rawData || null
         });
 
         // Keep only max allowed
@@ -211,6 +231,8 @@ export function addBookmark(card) {
             // JannyAI fields
             isJannyAI: card.isJannyAI || false,
             slug: card.slug || null,
+            // Wyvern fields
+            isWyvern: card.isWyvern || false,
             bookmarkedAt: new Date().toISOString()
         });
 
@@ -245,4 +267,117 @@ export function removeBookmark(cardId) {
 export function isBookmarked(cardId) {
     const bookmarks = loadBookmarks();
     return bookmarks.some(b => b.id === cardId);
+}
+
+// Load imported cards from localStorage (for "My Imports" browsing)
+export function loadImportedCards() {
+    try {
+        const saved = localStorage.getItem('botBrowser_importedCards');
+        if (saved) {
+            const cards = JSON.parse(saved);
+            console.log('[Bot Browser] Loaded imported cards:', cards.length, 'cards');
+            return cards;
+        }
+    } catch (error) {
+        console.error('[Bot Browser] Error loading imported cards:', error);
+    }
+    return [];
+}
+
+// Save imported cards to localStorage
+export function saveImportedCards(cards) {
+    try {
+        localStorage.setItem('botBrowser_importedCards', JSON.stringify(cards));
+    } catch (error) {
+        console.error('[Bot Browser] Error saving imported cards:', error);
+    }
+}
+
+// Track an imported card with full data for browsing
+export function trackImportedCard(card, type = 'character') {
+    try {
+        let importedCards = loadImportedCards();
+
+        // Check if already tracked (by id)
+        const existingIndex = importedCards.findIndex(c => c.id === card.id);
+        if (existingIndex !== -1) {
+            // Update existing entry with new timestamp
+            importedCards[existingIndex].imported_at = new Date().toISOString();
+            // Move to front
+            const existing = importedCards.splice(existingIndex, 1)[0];
+            importedCards.unshift(existing);
+        } else {
+            // Add new import record with essential data for browsing
+            const importRecord = {
+                id: card.id,
+                name: card.name,
+                creator: card.creator || 'Unknown',
+                avatar_url: card.avatar_url || card.image_url,
+                image_url: card.image_url || card.avatar_url,
+                tags: card.tags || [],
+                description: card.description || card.desc_preview || '',
+                desc_preview: card.desc_preview || (card.description ? card.description.substring(0, 200) : ''),
+                service: card.service,
+                sourceService: card.sourceService || card.service,
+                possibleNsfw: card.possibleNsfw || false,
+                nTokens: card.nTokens || null,
+                created_at: card.created_at || null,
+                type: type,
+                imported_at: new Date().toISOString(),
+                // Store identifiers for potential re-fetch
+                isLiveChub: card.isLiveChub || false,
+                fullPath: card.fullPath || null,
+                isJannyAI: card.isJannyAI || false,
+                slug: card.slug || null,
+                isCharacterTavern: card.isCharacterTavern || false,
+                isMlpchag: card.isMlpchag || false,
+                isWyvern: card.isWyvern || false
+            };
+
+            importedCards.unshift(importRecord);
+        }
+
+        // Keep max 500 imports
+        if (importedCards.length > 500) {
+            importedCards = importedCards.slice(0, 500);
+        }
+
+        saveImportedCards(importedCards);
+        console.log('[Bot Browser] Tracked imported card:', card.name);
+
+        return importedCards;
+    } catch (error) {
+        console.error('[Bot Browser] Error tracking imported card:', error);
+        return loadImportedCards();
+    }
+}
+
+// Remove an imported card from tracking
+export function removeImportedCard(cardId) {
+    try {
+        let importedCards = loadImportedCards();
+        const before = importedCards.length;
+        importedCards = importedCards.filter(c => c.id !== cardId);
+
+        if (importedCards.length < before) {
+            saveImportedCards(importedCards);
+            console.log('[Bot Browser] Removed imported card:', cardId);
+        }
+        return importedCards;
+    } catch (error) {
+        console.error('[Bot Browser] Error removing imported card:', error);
+        return loadImportedCards();
+    }
+}
+
+// Clear all imported cards
+export function clearImportedCards() {
+    try {
+        localStorage.removeItem('botBrowser_importedCards');
+        console.log('[Bot Browser] Cleared all imported cards');
+        return [];
+    } catch (error) {
+        console.error('[Bot Browser] Error clearing imported cards:', error);
+        return [];
+    }
 }

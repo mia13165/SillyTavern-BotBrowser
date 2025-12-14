@@ -679,12 +679,13 @@ body .bot-browser-detail-modal {
     .bot-browser-filters {
         flex-direction: column;
         align-items: stretch;
-        overflow: hidden;
+        overflow: visible;
     }
 
     .bot-browser-filter-group {
         width: 100%;
-        overflow: hidden;
+        overflow: visible;
+        position: relative;
     }
 
     .bot-browser-filter-group label {
@@ -695,11 +696,17 @@ body .bot-browser-detail-modal {
     .bot-browser-multi-select {
         min-width: 0;
         flex: 1;
-        overflow: hidden;
+        overflow: visible;
+        position: relative;
     }
 
     .bot-browser-multi-select-trigger {
         overflow: hidden;
+    }
+
+    /* Make dropdown properly visible on mobile */
+    .bot-browser-multi-select-dropdown {
+        z-index: 9999;
     }
 
     .bot-browser-multi-select-trigger .selected-text {
@@ -740,8 +747,11 @@ body .bot-browser-detail-modal {
     justify-content: space-between;
     align-items: center;
     height: 100%;
+    min-height: 44px; /* iOS recommended tap target */
     user-select: none;
     transition: all 0.2s ease;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .bot-browser-multi-select-trigger:hover {
@@ -775,7 +785,8 @@ body .bot-browser-detail-modal {
 }
 
 .bot-browser-multi-select-option {
-    padding: 8px 12px;
+    padding: 12px 16px;
+    min-height: 44px; /* iOS recommended tap target */
     cursor: pointer;
     display: flex;
     align-items: center;
@@ -785,6 +796,9 @@ body .bot-browser-detail-modal {
     font-size: 0.9em;
     border-bottom: 1px solid rgba(255, 255, 255, 0.05);
     user-select: none;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    box-sizing: border-box;
 }
 
 .bot-browser-multi-select-option:last-child {
@@ -1512,6 +1526,30 @@ body .bot-browser-detail-modal {
     font-weight: 600;
 }
 
+/* Actions container - stacks rows vertically */
+.bot-browser-detail-actions-container {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 12px 0;
+    margin-bottom: 16px;
+    border-bottom: 1px solid rgba(100, 150, 255, 0.15);
+}
+
+/* Each row of action buttons */
+.bot-browser-detail-actions-row {
+    display: flex;
+    gap: 8px;
+    flex-wrap: nowrap;
+}
+
+/* Random row styling */
+.bot-browser-random-row {
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+/* Legacy class for backwards compatibility */
 .bot-browser-detail-actions {
     display: flex;
     gap: 12px;
@@ -1522,23 +1560,26 @@ body .bot-browser-detail-modal {
 
 .bot-browser-import-button {
     flex: 1;
-    padding: 14px 24px;
+    padding: 10px 16px;
     background: linear-gradient(135deg, rgba(100, 200, 100, 0.35), rgba(60, 180, 60, 0.35));
-    border: 2px solid rgba(100, 200, 100, 0.6);
-    border-radius: 10px;
+    border: 1px solid rgba(100, 200, 100, 0.6);
+    border-radius: 8px;
     color: #fff;
-    font-size: 1.05em;
+    font-size: 0.9em;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
-    box-shadow: 0 3px 10px rgba(100, 200, 100, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
 }
 
 .bot-browser-import-button:hover {
     background: linear-gradient(135deg, rgba(100, 200, 100, 0.5), rgba(60, 180, 60, 0.5));
     border-color: rgba(100, 200, 100, 0.8);
-    transform: translateY(-2px);
-    box-shadow: 0 5px 16px rgba(100, 200, 100, 0.35);
+    transform: translateY(-1px);
 }
 
 .bot-browser-import-button:active {
@@ -1546,42 +1587,88 @@ body .bot-browser-detail-modal {
 }
 
 .bot-browser-detail-back {
-    padding: 14px 24px;
+    flex: 1;
+    padding: 10px 16px;
     background: rgba(255, 255, 255, 0.08);
-    border: 2px solid rgba(255, 255, 255, 0.3);
-    border-radius: 10px;
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    border-radius: 8px;
     color: #fff;
-    font-size: 1.05em;
+    font-size: 0.9em;
     font-weight: 600;
     cursor: pointer;
     transition: all 0.2s ease;
-    box-shadow: 0 3px 10px rgba(0, 0, 0, 0.2);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
 }
 
 .bot-browser-detail-back:hover {
     background: rgba(255, 255, 255, 0.15);
     border-color: rgba(255, 255, 255, 0.5);
-    transform: translateY(-2px);
-    box-shadow: 0 5px 16px rgba(255, 255, 255, 0.15);
+    transform: translateY(-1px);
 }
 
 .bot-browser-detail-back:active {
     transform: translateY(0px);
 }
 
-/* Mobile - slimmer action buttons */
+/* Mobile - larger tap targets for buttons */
 @media (max-width: 768px) {
+    .bot-browser-detail-actions-container {
+        padding: 10px 0;
+        gap: 8px;
+    }
+
+    .bot-browser-detail-actions-row {
+        gap: 8px;
+    }
 
     .bot-browser-import-button,
-    .bot-browser-detail-back {
-        padding: 6px 10px;
-        font-size: 0.8em;
+    .bot-browser-bookmark-btn,
+    .bot-browser-detail-back,
+    .bot-browser-random-same-btn,
+    .bot-browser-random-any-btn {
+        padding: 12px 16px;
+        font-size: 0.9em;
+        min-height: 44px;
     }
 
     .bot-browser-detail-actions {
         padding: 10px 0;
         margin-bottom: 12px;
-        gap: 6px;
+        gap: 8px;
+    }
+}
+
+/* Extra small mobile - icon only buttons with large tap targets */
+@media (max-width: 480px) {
+    .bot-browser-import-button span,
+    .bot-browser-bookmark-btn span,
+    .bot-browser-detail-back span,
+    .bot-browser-random-same-btn span,
+    .bot-browser-random-any-btn span {
+        display: none;
+    }
+
+    .bot-browser-import-button,
+    .bot-browser-bookmark-btn,
+    .bot-browser-detail-back,
+    .bot-browser-random-same-btn,
+    .bot-browser-random-any-btn {
+        padding: 14px 18px;
+        gap: 0;
+        min-height: 48px;
+        min-width: 48px;
+    }
+
+    .bot-browser-import-button i,
+    .bot-browser-bookmark-btn i,
+    .bot-browser-detail-back i,
+    .bot-browser-random-same-btn i,
+    .bot-browser-random-any-btn i {
+        font-size: 1.3em;
     }
 
     .bot-browser-detail-modal:not(#bot-browser-settings-modal) {
@@ -2376,6 +2463,185 @@ body #bot-browser-settings-modal,
     transform: none;
 }
 
+/* Character Tavern Advanced Filters */
+.bot-browser-advanced-filters-ct {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 15px 0;
+    animation: bot-browser-advancedFiltersExpand 0.3s ease;
+}
+
+.bot-browser-advanced-filters-ct.collapsed {
+    display: none;
+}
+
+.bot-browser-advanced-filters-ct input[type="text"],
+.bot-browser-advanced-filters-ct input[type="number"] {
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: white;
+    font-size: 0.9em;
+    transition: all 0.2s ease;
+}
+
+.bot-browser-advanced-filters-ct input[type="text"]:focus,
+.bot-browser-advanced-filters-ct input[type="number"]:focus {
+    outline: none;
+    border-color: rgba(200, 160, 255, 0.5);
+    box-shadow: 0 0 8px rgba(200, 160, 255, 0.2);
+}
+
+.bot-browser-advanced-filters-ct input::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.bot-browser-toggle-advanced-ct {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(200, 160, 255, 0.15);
+    border: 1px solid rgba(200, 160, 255, 0.4);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.9);
+    padding: 8px 12px;
+    font-size: 0.9em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.bot-browser-toggle-advanced-ct:hover {
+    background: rgba(200, 160, 255, 0.25);
+    border-color: rgba(200, 160, 255, 0.6);
+}
+
+.bot-browser-toggle-advanced-ct .toggle-icon {
+    margin-left: auto;
+}
+
+.bot-browser-apply-advanced-ct {
+    margin-top: 10px;
+    padding: 10px 20px;
+    background: linear-gradient(135deg, #7c3aed, #a855f7);
+    border: none;
+    border-radius: 6px;
+    color: white;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.bot-browser-apply-advanced-ct:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(168, 85, 247, 0.4);
+}
+
+.bot-browser-apply-advanced-ct:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
+/* Wyvern Chat Advanced Filters */
+.bot-browser-advanced-filters-wyvern {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 15px 0;
+    animation: bot-browser-advancedFiltersExpand 0.3s ease;
+}
+
+.bot-browser-advanced-filters-wyvern.collapsed {
+    display: none;
+}
+
+.bot-browser-advanced-filters-wyvern input[type="text"],
+.bot-browser-advanced-filters-wyvern input[type="number"] {
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: white;
+    font-size: 0.9em;
+    transition: all 0.2s ease;
+}
+
+.bot-browser-advanced-filters-wyvern input[type="text"]:focus,
+.bot-browser-advanced-filters-wyvern input[type="number"]:focus {
+    outline: none;
+    border-color: rgba(45, 212, 191, 0.5);
+    box-shadow: 0 0 8px rgba(45, 212, 191, 0.2);
+}
+
+.bot-browser-advanced-filters-wyvern input::placeholder {
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.bot-browser-advanced-filters-wyvern select {
+    padding: 8px 12px;
+    background: rgba(0, 0, 0, 0.3);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    border-radius: 6px;
+    color: white;
+    font-size: 0.9em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.bot-browser-advanced-filters-wyvern select:focus {
+    outline: none;
+    border-color: rgba(45, 212, 191, 0.5);
+    box-shadow: 0 0 8px rgba(45, 212, 191, 0.2);
+}
+
+.bot-browser-toggle-advanced-wyvern {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(45, 212, 191, 0.15);
+    border: 1px solid rgba(45, 212, 191, 0.4);
+    border-radius: 6px;
+    color: rgba(255, 255, 255, 0.9);
+    padding: 8px 12px;
+    font-size: 0.9em;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.bot-browser-toggle-advanced-wyvern:hover {
+    background: rgba(45, 212, 191, 0.25);
+    border-color: rgba(45, 212, 191, 0.6);
+}
+
+.bot-browser-toggle-advanced-wyvern .toggle-icon {
+    margin-left: auto;
+}
+
+.bot-browser-apply-advanced-wyvern {
+    margin-top: 10px;
+    padding: 10px 20px;
+    background: linear-gradient(135deg, #0d9488, #2dd4bf);
+    border: none;
+    border-radius: 6px;
+    color: white;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.bot-browser-apply-advanced-wyvern:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(45, 212, 191, 0.4);
+}
+
+.bot-browser-apply-advanced-wyvern:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+    transform: none;
+}
+
 @keyframes bot-browser-advancedFiltersExpand {
     from {
         opacity: 0;
@@ -2396,7 +2662,9 @@ body #bot-browser-settings-modal,
 /* Mobile vertical scrolling for advanced filters */
 @media (max-width: 600px) {
     .bot-browser-advanced-filters,
-    .bot-browser-advanced-filters-janny {
+    .bot-browser-advanced-filters-janny,
+    .bot-browser-advanced-filters-ct,
+    .bot-browser-advanced-filters-wyvern {
         max-height: 300px;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
@@ -2406,18 +2674,24 @@ body #bot-browser-settings-modal,
     }
 
     .bot-browser-advanced-filters::-webkit-scrollbar,
-    .bot-browser-advanced-filters-janny::-webkit-scrollbar {
+    .bot-browser-advanced-filters-janny::-webkit-scrollbar,
+    .bot-browser-advanced-filters-ct::-webkit-scrollbar,
+    .bot-browser-advanced-filters-wyvern::-webkit-scrollbar {
         width: 4px;
     }
 
     .bot-browser-advanced-filters::-webkit-scrollbar-track,
-    .bot-browser-advanced-filters-janny::-webkit-scrollbar-track {
+    .bot-browser-advanced-filters-janny::-webkit-scrollbar-track,
+    .bot-browser-advanced-filters-ct::-webkit-scrollbar-track,
+    .bot-browser-advanced-filters-wyvern::-webkit-scrollbar-track {
         background: rgba(255, 255, 255, 0.1);
         border-radius: 2px;
     }
 
     .bot-browser-advanced-filters::-webkit-scrollbar-thumb,
-    .bot-browser-advanced-filters-janny::-webkit-scrollbar-thumb {
+    .bot-browser-advanced-filters-janny::-webkit-scrollbar-thumb,
+    .bot-browser-advanced-filters-ct::-webkit-scrollbar-thumb,
+    .bot-browser-advanced-filters-wyvern::-webkit-scrollbar-thumb {
         background: rgba(255, 255, 255, 0.3);
         border-radius: 2px;
     }
@@ -2540,6 +2814,53 @@ body #bot-browser-settings-modal,
     opacity: 0.6;
     cursor: not-allowed;
     transform: none;
+}
+
+/* Trending */
+.bot-browser-trending-container {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    flex: 1;
+    padding: 10px;
+    overflow-y: auto;
+}
+
+.bot-browser-trending-empty {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255, 255, 255, 0.5);
+    text-align: center;
+    padding: 40px 20px;
+}
+
+.bot-browser-trending-empty i {
+    font-size: 48px;
+    margin-bottom: 16px;
+    opacity: 0.4;
+    color: rgba(255, 100, 100, 0.6);
+}
+
+.bot-browser-trending-empty p {
+    font-size: 1.1em;
+    margin: 0 0 8px 0;
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.bot-browser-trending-empty span {
+    font-size: 0.9em;
+    color: rgba(255, 255, 255, 0.4);
+}
+
+.bot-browser-trending-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 15px;
+    width: 100%;
+    padding: 5px;
+    align-content: start;
 }
 
 /* Bookmarks & Collections */
@@ -2665,33 +2986,144 @@ body #bot-browser-settings-modal,
 
 /* Bookmark button in detail modal */
 .bot-browser-bookmark-btn {
+    flex: 1;
     background: transparent;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    color: rgba(255, 255, 255, 0.7);
+    border: 1px solid rgba(255, 200, 50, 0.3);
+    color: rgba(255, 255, 255, 0.8);
     padding: 10px 16px;
     border-radius: 8px;
     cursor: pointer;
     font-size: 0.9em;
+    font-weight: 600;
     transition: all 0.2s ease;
     display: flex;
     align-items: center;
-    gap: 8px;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
 }
 
 .bot-browser-bookmark-btn:hover {
-    background: rgba(255, 200, 50, 0.1);
-    border-color: rgba(255, 200, 50, 0.4);
-    color: rgba(255, 200, 50, 0.9);
+    background: rgba(255, 200, 50, 0.15);
+    border-color: rgba(255, 200, 50, 0.5);
+    color: rgba(255, 200, 50, 0.95);
 }
 
 .bot-browser-bookmark-btn.bookmarked {
-    background: rgba(255, 200, 50, 0.15);
-    border-color: rgba(255, 200, 50, 0.5);
+    background: rgba(255, 200, 50, 0.2);
+    border-color: rgba(255, 200, 50, 0.6);
     color: rgba(255, 200, 50, 1);
 }
 
 .bot-browser-bookmark-btn.bookmarked i {
     color: rgba(255, 200, 50, 1);
+}
+
+/* Random card buttons */
+.bot-browser-random-same-btn,
+.bot-browser-random-any-btn {
+    flex: 1;
+    background: transparent;
+    border: 1px solid rgba(100, 200, 255, 0.3);
+    color: rgba(100, 200, 255, 0.9);
+    padding: 10px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9em;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    white-space: nowrap;
+}
+
+.bot-browser-random-same-btn:hover {
+    background: rgba(100, 200, 255, 0.15);
+    border-color: rgba(100, 200, 255, 0.5);
+    color: rgba(100, 200, 255, 1);
+    transform: translateY(-1px);
+}
+
+.bot-browser-random-any-btn {
+    border-color: rgba(200, 150, 255, 0.3);
+    color: rgba(200, 150, 255, 0.9);
+}
+
+.bot-browser-random-any-btn:hover {
+    background: rgba(200, 150, 255, 0.15);
+    border-color: rgba(200, 150, 255, 0.5);
+    color: rgba(200, 150, 255, 1);
+    transform: translateY(-1px);
+}
+
+.bot-browser-random-same-btn:disabled,
+.bot-browser-random-any-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Legacy random buttons container (backwards compat) */
+.bot-browser-random-buttons {
+    display: flex;
+    gap: 8px;
+    margin-left: auto;
+}
+
+/* Open in SillyTavern button */
+.bot-browser-open-st-row {
+    padding-top: 8px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.bot-browser-open-in-st-btn {
+    flex: 1;
+    background: linear-gradient(135deg, rgba(100, 200, 150, 0.25), rgba(60, 180, 120, 0.25));
+    border: 1px solid rgba(100, 200, 150, 0.5);
+    color: rgba(255, 255, 255, 0.95);
+    padding: 10px 16px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9em;
+    font-weight: 600;
+    transition: all 0.2s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    white-space: nowrap;
+}
+
+.bot-browser-open-in-st-btn:hover {
+    background: linear-gradient(135deg, rgba(100, 200, 150, 0.4), rgba(60, 180, 120, 0.4));
+    border-color: rgba(100, 200, 150, 0.7);
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(100, 200, 150, 0.25);
+}
+
+.bot-browser-open-in-st-btn:active {
+    transform: translateY(0);
+}
+
+.bot-browser-open-in-st-btn i {
+    color: rgba(100, 200, 150, 0.9);
+}
+
+/* Mobile - hide text, show icon only */
+@media (max-width: 480px) {
+    .bot-browser-open-in-st-btn span {
+        display: none;
+    }
+
+    .bot-browser-open-in-st-btn {
+        padding: 10px 14px;
+        gap: 0;
+    }
+
+    .bot-browser-open-in-st-btn i {
+        font-size: 1.1em;
+    }
 }
 
 /* Iframe browser modal (JannyAI, etc.) */

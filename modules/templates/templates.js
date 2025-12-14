@@ -41,11 +41,12 @@ export function createCardHTML(card) {
 export function getOriginalMenuHTML(recentlyViewed) {
     return `
         <div class="bot-browser-header">
-            <h3>Bot Browser <span style="font-size: 0.6em; font-weight: 400; color: rgba(255, 255, 255, 0.6);">v1.1.1</span></h3>
+            <h3>Bot Browser <span style="font-size: 0.6em; font-weight: 400; color: rgba(255, 255, 255, 0.6);">v1.1.2</span></h3>
             <div class="bot-browser-tabs">
                 <button class="bot-browser-tab active" data-tab="bots">Bots</button>
                 <button class="bot-browser-tab" data-tab="lorebooks">Lorebooks</button>
                 <button class="bot-browser-tab" data-tab="collections">Collections</button>
+                <button class="bot-browser-tab" data-tab="trending">Trending</button>
                 <button class="bot-browser-tab" data-tab="bookmarks">Bookmarks</button>
             </div>
             <button class="bot-browser-close" title="Close">
@@ -75,9 +76,49 @@ export function getOriginalMenuHTML(recentlyViewed) {
                     </div>
                     <span>Search All</span>
                 </button>
+                <button class="bot-browser-source" data-source="my_imports">
+                    <div class="bot-browser-source-icon" style="background: linear-gradient(135deg, rgba(100, 200, 100, 0.3), rgba(50, 150, 100, 0.3)); display: flex; align-items: center; justify-content: center; font-size: 26px; color: rgba(255, 255, 255, 0.8);">
+                        <i class="fa-solid fa-download"></i>
+                    </div>
+                    <span>My Imports</span>
+                </button>
+                <!-- Live API Sources (sorted by size - largest first) -->
+                <button class="bot-browser-source" data-source="chub">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://avatars.charhub.io/icons/assets/full_logo.png'); background-size: cover; background-position: center; background-repeat: no-repeat; background-color: white;"></div>
+                    <span>Chub</span>
+                </button>
+                <button class="bot-browser-source" data-source="jannyai">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://tse3.mm.bing.net/th/id/OIP.nb-qi0od9W6zRsskVwL6QAHaHa?rs=1&pid=ImgDetMain&o=7&rm=3'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
+                    <span>JannyAI</span>
+                </button>
+                <button class="bot-browser-source" data-source="character_tavern">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://character-tavern.com/_app/immutable/assets/logo.DGIlOnDO.png'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
+                    <span>Character Tavern</span>
+                </button>
+                <button class="bot-browser-source" data-source="wyvern">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://substackcdn.com/image/fetch/w_176,h_176,c_fill,f_webp,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F6ea09a00-0248-4482-a893-1a2d1e3fe3c1_512x512.png'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
+                    <span>Wyvern Chat</span>
+                </button>
+                <button class="bot-browser-source" data-source="mlpchag">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://derpicdn.net/img/view/2015/9/26/988523__safe_solo_upvotes+galore_smiling_cute_derpy+hooves_looking+at+you_looking+up_part+of+a_set_derpibooru+exclusive.png'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
+                    <span>MLPchag</span>
+                </button>
+                <!-- Archive Sources (sorted by size - largest first) -->
+                <button class="bot-browser-source" data-source="catbox">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://catbox.tech/favicon128.png'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
+                    <span>Catbox</span>
+                </button>
+                <button class="bot-browser-source" data-source="anchorhold">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://assets.coingecko.com/coins/images/30124/large/4CHAN.png?1696529046'); background-size: 85%; background-position: center; background-repeat: no-repeat;"></div>
+                    <span>4chan - /aicg/</span>
+                </button>
                 <button class="bot-browser-source" data-source="risuai_realm">
                     <div class="bot-browser-source-icon" style="background-image: url('https://files.catbox.moe/216rab.webp'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
                     <span>Risuai Realm</span>
+                </button>
+                <button class="bot-browser-source" data-source="desuarchive">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://s2.vndb.org/ch/32/17032.jpg'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
+                    <span>Desuarchive</span>
                 </button>
                 <button class="bot-browser-source" data-source="webring">
                     <div class="bot-browser-source-icon" style="background-image: url('https://files.catbox.moe/6avrsl.png'); background-size: 85%; background-position: center; background-repeat: no-repeat;"></div>
@@ -87,30 +128,6 @@ export function getOriginalMenuHTML(recentlyViewed) {
                     <div class="bot-browser-source-icon" style="background-image: url('https://nyai.me/img/necologofavicon-64.png'); background-size: 85%; background-position: center; background-repeat: no-repeat;"></div>
                     <span>Nyai.me</span>
                 </button>
-                <button class="bot-browser-source" data-source="chub">
-                    <div class="bot-browser-source-icon" style="background-image: url('https://avatars.charhub.io/icons/assets/full_logo.png'); background-size: cover; background-position: center; background-repeat: no-repeat; background-color: white;"></div>
-                    <span>Chub</span>
-                </button>
-                <button class="bot-browser-source" data-source="character_tavern">
-                    <div class="bot-browser-source-icon" style="background-image: url('https://character-tavern.com/_app/immutable/assets/logo.DGIlOnDO.png'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
-                    <span>Character Tavern</span>
-                </button>
-                <button class="bot-browser-source" data-source="catbox">
-                    <div class="bot-browser-source-icon" style="background-image: url('https://catbox.tech/favicon128.png'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
-                    <span>Catbox</span>
-                </button>
-                <button class="bot-browser-source" data-source="anchorhold">
-                    <div class="bot-browser-source-icon" style="background-image: url('https://assets.coingecko.com/coins/images/30124/large/4CHAN.png?1696529046'); background-size: 85%; background-position: center; background-repeat: no-repeat;"></div>
-                    <span>4chan - /aicg/</span>
-                </button>
-                <button class="bot-browser-source" data-source="mlpchag">
-                    <div class="bot-browser-source-icon" style="background-image: url('https://derpicdn.net/img/view/2015/9/26/988523__safe_solo_upvotes+galore_smiling_cute_derpy+hooves_looking+at+you_looking+up_part+of+a_set_derpibooru+exclusive.png'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
-                    <span>MLPchag</span>
-                </button>
-                <button class="bot-browser-source" data-source="desuarchive">
-                    <div class="bot-browser-source-icon" style="background-image: url('https://s2.vndb.org/ch/32/17032.jpg'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
-                    <span>Desuarchive</span>
-                </button>
                 <button class="bot-browser-source" data-source="quillgen">
                     <div class="bot-browser-source-icon" style="background: linear-gradient(135deg, #1a1a2e, #16213e); display: flex; align-items: center; justify-content: center;">
                         <img src="https://quillgen.app/logo-dark.png"
@@ -118,10 +135,6 @@ export function getOriginalMenuHTML(recentlyViewed) {
                              style="max-width: 100%; max-height: 100%; display: block;">
                     </div>
                     <span>QuillGen.app</span>
-                </button>
-                <button class="bot-browser-source" data-source="jannyai">
-                    <div class="bot-browser-source-icon" style="background-image: url('https://tse3.mm.bing.net/th/id/OIP.nb-qi0od9W6zRsskVwL6QAHaHa?rs=1&pid=ImgDetMain&o=7&rm=3'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
-                    <span>JannyAI</span>
                 </button>
             </div>
         </div>
@@ -131,6 +144,10 @@ export function getOriginalMenuHTML(recentlyViewed) {
                 <button class="bot-browser-source" data-source="chub_lorebooks">
                     <div class="bot-browser-source-icon" style="background-image: url('https://avatars.charhub.io/icons/assets/full_logo.png'); background-size: cover; background-position: center; background-repeat: no-repeat; background-color: white;"></div>
                     <span>Chub</span>
+                </button>
+                <button class="bot-browser-source" data-source="wyvern_lorebooks">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://substackcdn.com/image/fetch/w_176,h_176,c_fill,f_webp,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F6ea09a00-0248-4482-a893-1a2d1e3fe3c1_512x512.png'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
+                    <span>Wyvern Chat</span>
                 </button>
             </div>
         </div>
@@ -154,10 +171,31 @@ export function getOriginalMenuHTML(recentlyViewed) {
                 </button>
             </div>
         </div>
+
+        <div class="bot-browser-tab-content" data-content="trending">
+            <div class="bot-browser-grid">
+                <button class="bot-browser-source" data-source="chub_trending">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://avatars.charhub.io/icons/assets/full_logo.png'); background-size: cover; background-position: center; background-repeat: no-repeat; background-color: white;"></div>
+                    <span>Chub</span>
+                </button>
+                <button class="bot-browser-source" data-source="jannyai_trending">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://tse3.mm.bing.net/th/id/OIP.nb-qi0od9W6zRsskVwL6QAHaHa?rs=1&pid=ImgDetMain&o=7&rm=3'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
+                    <span>JanitorAI/JannyAI</span>
+                </button>
+                <button class="bot-browser-source" data-source="character_tavern_trending">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://character-tavern.com/_app/immutable/assets/logo.DGIlOnDO.png'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
+                    <span>Character Tavern</span>
+                </button>
+                <button class="bot-browser-source" data-source="wyvern_trending">
+                    <div class="bot-browser-source-icon" style="background-image: url('https://substackcdn.com/image/fetch/w_176,h_176,c_fill,f_webp,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F6ea09a00-0248-4482-a893-1a2d1e3fe3c1_512x512.png'); background-size: cover; background-position: center; background-repeat: no-repeat;"></div>
+                    <span>Wyvern Chat</span>
+                </button>
+            </div>
+        </div>
     `;
 }
 
-export function createBrowserHeader(serviceDisplayName, searchValue, cardCountText, searchCollapsed = false, hideNsfw = false, isLiveChub = false, advancedFilters = null, isJannyAI = false, jannyAdvancedFilters = null) {
+export function createBrowserHeader(serviceDisplayName, searchValue, cardCountText, searchCollapsed = false, hideNsfw = false, isLiveChub = false, advancedFilters = null, isJannyAI = false, jannyAdvancedFilters = null, isCharacterTavern = false, ctAdvancedFilters = null, isWyvern = false, wyvernAdvancedFilters = null) {
     return `
         <div class="bot-browser-header-bar">
             <button class="bot-browser-back-button">
@@ -372,6 +410,75 @@ export function createBrowserHeader(serviceDisplayName, searchValue, cardCountTe
                         </div>
                     </div>
                     <button class="bot-browser-apply-advanced-janny" type="button">Apply Filters</button>
+                </div>
+            </div>
+            ` : ''}
+
+            ${isCharacterTavern ? `
+            <div class="bot-browser-advanced-filters-section">
+                <button class="bot-browser-toggle-advanced-ct" type="button">
+                    <i class="fa-solid fa-sliders"></i> Advanced Character Tavern Filters
+                    <i class="fa-solid fa-chevron-down toggle-icon"></i>
+                </button>
+                <div class="bot-browser-advanced-filters-ct collapsed">
+                    <div class="bot-browser-filter-row">
+                        <div class="bot-browser-filter-group">
+                            <label>Token Range:</label>
+                            <div class="bot-browser-token-range">
+                                <input type="number" class="bot-browser-ct-min-tokens" placeholder="Min" min="0" value="${ctAdvancedFilters?.minTokens || ''}">
+                                <span>-</span>
+                                <input type="number" class="bot-browser-ct-max-tokens" placeholder="Max" min="0" value="${ctAdvancedFilters?.maxTokens || ''}">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="bot-browser-filter-row">
+                        <div class="bot-browser-filter-group full-width">
+                            <label>Tags (comma-separated):</label>
+                            <input type="text" class="bot-browser-ct-tags" placeholder="e.g., fantasy, romance" value="${escapeHTML(ctAdvancedFilters?.tags?.join(', ') || '')}">
+                        </div>
+                    </div>
+                    <div class="bot-browser-filter-row">
+                        <div class="bot-browser-requirements">
+                            <label class="bot-browser-checkbox">
+                                <input type="checkbox" class="bot-browser-ct-has-lorebook" ${ctAdvancedFilters?.hasLorebook ? 'checked' : ''}>
+                                <span>Has Lorebook</span>
+                            </label>
+                            <label class="bot-browser-checkbox">
+                                <input type="checkbox" class="bot-browser-ct-is-oc" ${ctAdvancedFilters?.isOC ? 'checked' : ''}>
+                                <span>Original Character</span>
+                            </label>
+                        </div>
+                    </div>
+                    <button class="bot-browser-apply-advanced-ct" type="button">Apply Filters</button>
+                </div>
+            </div>
+            ` : ''}
+
+            ${isWyvern ? `
+            <div class="bot-browser-advanced-filters-section">
+                <button class="bot-browser-toggle-advanced-wyvern" type="button">
+                    <i class="fa-solid fa-sliders"></i> Advanced Wyvern Filters
+                    <i class="fa-solid fa-chevron-down toggle-icon"></i>
+                </button>
+                <div class="bot-browser-advanced-filters-wyvern collapsed">
+                    <div class="bot-browser-filter-row">
+                        <div class="bot-browser-filter-group">
+                            <label>Content Rating:</label>
+                            <select class="bot-browser-wyvern-rating">
+                                <option value="all" ${!wyvernAdvancedFilters?.rating || wyvernAdvancedFilters?.rating === 'all' ? 'selected' : ''}>All Content</option>
+                                <option value="none" ${wyvernAdvancedFilters?.rating === 'none' ? 'selected' : ''}>SFW Only</option>
+                                <option value="mature" ${wyvernAdvancedFilters?.rating === 'mature' ? 'selected' : ''}>Mature</option>
+                                <option value="explicit" ${wyvernAdvancedFilters?.rating === 'explicit' ? 'selected' : ''}>Explicit</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="bot-browser-filter-row">
+                        <div class="bot-browser-filter-group full-width">
+                            <label>Tags (comma-separated):</label>
+                            <input type="text" class="bot-browser-wyvern-tags" placeholder="e.g., Action, FemPOV, Female" value="${escapeHTML(wyvernAdvancedFilters?.tags?.join(', ') || '')}">
+                        </div>
+                    </div>
+                    <button class="bot-browser-apply-advanced-wyvern" type="button">Apply Filters</button>
                 </div>
             </div>
             ` : ''}

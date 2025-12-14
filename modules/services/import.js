@@ -12,11 +12,18 @@ export async function importCardToSillyTavern(card, extensionName, extension_set
 
     try {
         // Detect if this is a lorebook or a character
-        // Check for isLorebook flag (live Chub) or URL pattern (archive)
-        const isLorebook = card.isLorebook || (card.service === 'chub' && card.id && card.id.includes('/lorebooks/'));
+        // Check for isLorebook flag (live Chub/Wyvern) or URL pattern (archive)
+        const isLorebook = card.isLorebook ||
+                          (card.service === 'chub' && card.id && card.id.includes('/lorebooks/')) ||
+                          card.service === 'wyvern_lorebooks' || card.sourceService === 'wyvern_lorebooks_live';
 
         if (isLorebook) {
-            importStats = await importLorebook(card, extensionName, extension_settings, importStats, getRequestHeaders);
+            // Handle Wyvern lorebooks separately - they have embedded data
+            if (card.isWyvern || card.sourceService === 'wyvern_lorebooks_live' || card.service === 'wyvern_lorebooks') {
+                importStats = await importWyvernLorebook(card, extensionName, extension_settings, importStats);
+            } else {
+                importStats = await importLorebook(card, extensionName, extension_settings, importStats, getRequestHeaders);
+            }
         } else {
             importStats = await importCharacter(card, extensionName, extension_settings, importStats, processDroppedFiles, getRequestHeaders);
         }
@@ -85,6 +92,61 @@ async function importLorebook(card, extensionName, extension_settings, importSta
     return trackImport(extensionName, extension_settings, importStats, card, 'lorebook');
 }
 
+// Import Wyvern lorebook - uses _rawData with entries
+async function importWyvernLorebook(card, extensionName, extension_settings, importStats) {
+    console.log('[Bot Browser] Importing Wyvern lorebook:', card.name);
+
+    const entries = card._rawData?.entries || [];
+
+    // Convert Wyvern entries to SillyTavern World Info format
+    const worldInfoData = {
+        entries: {}
+    };
+
+    entries.forEach((entry, index) => {
+        worldInfoData.entries[index] = {
+            uid: index,
+            key: entry.keys || [],
+            keysecondary: entry.secondary_keys || [],
+            comment: entry.name || entry.comment || `Entry ${index + 1}`,
+            content: entry.content || '',
+            constant: entry.constant || false,
+            selective: entry.selective || true,
+            selectiveLogic: entry.selective_logic || 0,
+            addMemo: true,
+            order: entry.order || entry.insertion_order || 100,
+            position: entry.position || 0,
+            disable: entry.enabled === false,
+            excludeRecursion: entry.exclude_recursion || false,
+            probability: entry.probability || 100,
+            useProbability: entry.use_probability || true,
+            depth: entry.depth || 4,
+            group: entry.group || '',
+            scanDepth: entry.scan_depth || null,
+            caseSensitive: entry.case_sensitive || false,
+            matchWholeWords: entry.match_whole_words || false,
+            automationId: entry.automation_id || '',
+            role: entry.role || 0,
+            vectorized: false,
+            displayIndex: index
+        };
+    });
+
+    // Create World Info JSON
+    const worldInfoJson = JSON.stringify(worldInfoData);
+    const fileName = card.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.json';
+    const file = new File([worldInfoJson], fileName, { type: 'application/json' });
+
+    // Use SillyTavern's native importWorldInfo function
+    await importWorldInfo(file);
+
+    toastr.success(`${card.name} lorebook imported successfully!`, '', { timeOut: 2000 });
+    console.log('[Bot Browser] Wyvern lorebook imported successfully');
+
+    // Track import
+    return trackImport(extensionName, extension_settings, importStats, card, 'lorebook');
+}
+
 // Import character
 async function importCharacter(card, extensionName, extension_settings, importStats, processDroppedFiles, getRequestHeaders) {
     // Handle live Chub cards - fetch full data from API first
@@ -109,6 +171,18 @@ async function importCharacter(card, extensionName, extension_settings, importSt
     if (card.isJannyAI || card.service === 'jannyai' || card.sourceService === 'jannyai') {
         console.log('[Bot Browser] Importing JannyAI card:', card.name);
         return await importJannyAICard(card, extensionName, extension_settings, importStats, processDroppedFiles);
+    }
+
+    // Handle Character Tavern live API cards - full data is in _rawData
+    if (card.isCharacterTavern || card.sourceService === 'character_tavern_live') {
+        console.log('[Bot Browser] Importing Character Tavern card:', card.name);
+        return await importCharacterTavernCard(card, extensionName, extension_settings, importStats, processDroppedFiles);
+    }
+
+    // Handle Wyvern Chat cards - full data is in _rawData
+    if (card.isWyvern || card.sourceService === 'wyvern_live' || card.service === 'wyvern') {
+        console.log('[Bot Browser] Importing Wyvern card:', card.name);
+        return await importWyvernCard(card, extensionName, extension_settings, importStats, processDroppedFiles);
     }
 
     // Determine which URL to use based on service
@@ -394,6 +468,228 @@ async function importJannyAICard(card, extensionName, extension_settings, import
 
     toastr.success(`${card.name} imported successfully!`, '', { timeOut: 2000 });
     console.log('[Bot Browser] JannyAI card imported successfully');
+
+    // Track import
+    return trackImport(extensionName, extension_settings, importStats, card, 'character');
+}
+
+// Import Character Tavern card - uses _rawData from API response
+async function importCharacterTavernCard(card, extensionName, extension_settings, importStats, processDroppedFiles) {
+    console.log('[Bot Browser] Importing Character Tavern card with embedded data');
+
+    const raw = card._rawData || {};
+
+    // Convert to Character Card V2 format
+    const characterData = {
+        spec: 'chara_card_v2',
+        spec_version: '2.0',
+        data: {
+            name: card.name || '',
+            description: raw.characterDefinition || '',
+            personality: raw.characterPersonality || '',
+            scenario: raw.characterScenario || '',
+            first_mes: raw.characterFirstMessage || '',
+            mes_example: raw.characterExampleMessages || '',
+            creator_notes: card.description || '',
+            system_prompt: raw.characterPostHistoryPrompt || '',
+            post_history_instructions: raw.characterPostHistoryPrompt || '',
+            creator: card.creator || '',
+            character_version: '1.0',
+            tags: card.tags || [],
+            alternate_greetings: raw.alternativeFirstMessage || [],
+            extensions: {
+                talkativeness: '0.5',
+                fav: false,
+                world: '',
+                depth_prompt: {
+                    prompt: '',
+                    depth: 4
+                }
+            }
+        }
+    };
+
+    console.log('[Bot Browser] Character Tavern V2 card data:', characterData);
+
+    // Get the avatar image
+    let imageBlob;
+    const imageUrl = card.avatar_url || card.image_url;
+
+    if (imageUrl) {
+        try {
+            // Try fetching directly first
+            let imageResponse = await fetch(imageUrl);
+
+            if (!imageResponse.ok) {
+                // Try with CORS proxy
+                console.log('[Bot Browser] Direct fetch failed, trying CORS proxy...');
+                const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(imageUrl)}`;
+                imageResponse = await fetch(proxyUrl);
+            }
+
+            if (imageResponse.ok) {
+                imageBlob = await imageResponse.blob();
+                console.log('[Bot Browser] ✓ Fetched Character Tavern avatar image');
+            }
+        } catch (error) {
+            console.warn('[Bot Browser] Failed to fetch Character Tavern avatar:', error);
+        }
+    }
+
+    // If no image available, use default avatar
+    if (!imageBlob) {
+        console.log('[Bot Browser] Using default avatar for Character Tavern card');
+        const defaultAvatarResponse = await fetch(default_avatar);
+        imageBlob = await defaultAvatarResponse.blob();
+    }
+
+    // Encode character data as base64 to embed in PNG
+    const jsonString = JSON.stringify(characterData);
+    const base64Data = btoa(unescape(encodeURIComponent(jsonString)));
+
+    // Create PNG with embedded character data
+    const pngBlob = await createCharacterPNG(imageBlob, base64Data);
+    const fileName = card.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.png';
+    const file = new File([pngBlob], fileName, { type: 'image/png' });
+
+    // Import the character
+    await processDroppedFiles([file]);
+
+    toastr.success(`${card.name} imported successfully!`, '', { timeOut: 2000 });
+    console.log('[Bot Browser] Character Tavern card imported successfully');
+
+    // Track import
+    return trackImport(extensionName, extension_settings, importStats, card, 'character');
+}
+
+// Import Wyvern Chat card - uses _rawData from API response
+async function importWyvernCard(card, extensionName, extension_settings, importStats, processDroppedFiles) {
+    console.log('[Bot Browser] Importing Wyvern card with embedded data');
+    console.log('[Bot Browser] Full card object:', card);
+    console.log('[Bot Browser] card._rawData:', card._rawData);
+
+    const raw = card._rawData || {};
+
+    // Wyvern API field mapping (from actual API response):
+    // - API 'description' = character definition/personality → raw.description → ST description
+    // - API 'first_mes' = first message/greeting → raw.first_mes → ST first_mes
+    // - API 'scenario' = scenario → raw.scenario → ST scenario
+    // - API 'personality' = personality (usually empty) → raw.personality
+    // - API 'mes_example' = example messages (usually empty) → raw.mes_example
+    // - API 'creator_notes' / 'shared_info' = creator notes → raw.creator_notes
+    // - API 'pre_history_instructions' = system prompt → raw.system_prompt
+    // - API 'post_history_instructions' = post history → raw.post_history_instructions
+    // - API 'alternate_greetings' = alternate greetings array
+
+    // Debug: Log all raw values from _rawData
+    console.log('[Bot Browser] Wyvern raw field values:', {
+        'raw.description (char def)': raw.description?.substring(0, 100),
+        'raw.first_mes': raw.first_mes?.substring(0, 100),
+        'raw.scenario': raw.scenario?.substring(0, 100),
+        'raw.personality': raw.personality?.substring(0, 100),
+        'raw.mes_example': raw.mes_example?.substring(0, 100),
+        'raw.creator_notes': raw.creator_notes?.substring(0, 100),
+        'raw.system_prompt': raw.system_prompt?.substring(0, 100),
+        'raw.alternate_greetings count': raw.alternate_greetings?.length || 0,
+    });
+
+    // Convert to Character Card V2 format
+    // Wyvern API field mapping (from actual API response):
+    // - raw.description = character definition/personality (ST description)
+    // - raw.first_mes = first message/greeting (ST first_mes)
+    // - raw.scenario = scenario (ST scenario)
+    // - raw.mes_example = example messages (usually empty)
+    // - raw.creator_notes = creator notes
+    // - raw.system_prompt = system prompt (from pre_history_instructions)
+    // - raw.post_history_instructions = post history instructions
+    const characterData = {
+        spec: 'chara_card_v2',
+        spec_version: '2.0',
+        data: {
+            name: card.name || raw.name || '',
+            // ST 'description' = character definition = Wyvern 'description'
+            description: raw.description || card.description || '',
+            personality: raw.personality || card.personality || '',
+            // ST 'scenario' = scenario = Wyvern 'scenario'
+            scenario: raw.scenario || card.scenario || '',
+            // ST 'first_mes' = first message = Wyvern 'first_mes'
+            first_mes: raw.first_mes || card.first_message || '',
+            // Wyvern mes_example (usually empty but include if present)
+            mes_example: raw.mes_example || card.mes_example || '',
+            creator_notes: raw.creator_notes || card.creator_notes || '',
+            system_prompt: raw.system_prompt || card.system_prompt || '',
+            post_history_instructions: raw.post_history_instructions || card.post_history_instructions || '',
+            creator: raw.creator || card.creator || '',
+            character_version: '1.0',
+            tags: raw.tags || card.tags || [],
+            alternate_greetings: raw.alternate_greetings || card.alternate_greetings || [],
+            extensions: {
+                talkativeness: '0.5',
+                fav: false,
+                world: '',
+                depth_prompt: {
+                    prompt: '',
+                    depth: 4
+                }
+            }
+        }
+    };
+
+    console.log('[Bot Browser] Wyvern V2 card data:', characterData);
+    console.log('[Bot Browser] Final field values:', {
+        'description (char definition)': characterData.data.description?.substring(0, 100),
+        'scenario': characterData.data.scenario?.substring(0, 100),
+        'first_mes': characterData.data.first_mes?.substring(0, 100),
+        'mes_example': characterData.data.mes_example?.substring(0, 100),
+        'system_prompt': characterData.data.system_prompt?.substring(0, 100),
+    });
+
+    // Get the avatar image
+    let imageBlob;
+    const imageUrl = card.avatar_url || card.image_url;
+
+    if (imageUrl) {
+        try {
+            // Try fetching directly first
+            let imageResponse = await fetch(imageUrl);
+
+            if (!imageResponse.ok) {
+                // Try with CORS proxy
+                console.log('[Bot Browser] Direct fetch failed, trying CORS proxy...');
+                const proxyUrl = `https://corsproxy.io/?url=${encodeURIComponent(imageUrl)}`;
+                imageResponse = await fetch(proxyUrl);
+            }
+
+            if (imageResponse.ok) {
+                imageBlob = await imageResponse.blob();
+                console.log('[Bot Browser] ✓ Fetched Wyvern avatar image');
+            }
+        } catch (error) {
+            console.warn('[Bot Browser] Failed to fetch Wyvern avatar:', error);
+        }
+    }
+
+    // If no image available, use default avatar
+    if (!imageBlob) {
+        console.log('[Bot Browser] Using default avatar for Wyvern card');
+        const defaultAvatarResponse = await fetch(default_avatar);
+        imageBlob = await defaultAvatarResponse.blob();
+    }
+
+    // Encode character data as base64 to embed in PNG
+    const jsonString = JSON.stringify(characterData);
+    const base64Data = btoa(unescape(encodeURIComponent(jsonString)));
+
+    // Create PNG with embedded character data
+    const pngBlob = await createCharacterPNG(imageBlob, base64Data);
+    const fileName = card.name.replace(/[^a-z0-9]/gi, '_').toLowerCase() + '.png';
+    const file = new File([pngBlob], fileName, { type: 'image/png' });
+
+    // Import the character
+    await processDroppedFiles([file]);
+
+    toastr.success(`${card.name} imported successfully!`, '', { timeOut: 2000 });
+    console.log('[Bot Browser] Wyvern card imported successfully');
 
     // Track import
     return trackImport(extensionName, extension_settings, importStats, card, 'character');

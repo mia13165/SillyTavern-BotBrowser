@@ -2,7 +2,7 @@ import { extension_settings } from '../../../extensions.js';
 import { eventSource, event_types, saveSettingsDebounced, processDroppedFiles, getRequestHeaders } from '../../../../script.js';
 
 // Import modules
-import { loadImportStats, saveImportStats, loadRecentlyViewed, loadPersistentSearch, loadBookmarks, removeBookmark } from './modules/storage/storage.js';
+import { loadImportStats, saveImportStats, loadRecentlyViewed, loadPersistentSearch, loadBookmarks, removeBookmark, clearImportedCards } from './modules/storage/storage.js';
 import { getTimeAgo } from './modules/storage/stats.js';
 import { loadServiceIndex, initializeServiceCache, clearQuillgenCache } from './modules/services/cache.js';
 import { getRandomCard } from './modules/services/cards.js';
@@ -14,6 +14,12 @@ import { escapeHTML } from './modules/utils/utils.js';
 import { searchJannyCharacters, transformJannyCard, JANNYAI_TAGS } from './modules/services/jannyApi.js';
 import { fetchJannyCollections, fetchJannyCollectionDetails } from './modules/services/jannyCollectionsApi.js';
 import { createCollectionCardHTML, createCollectionsBrowserHeader } from './modules/templates/templates.js';
+import {
+    fetchCharacterTavernTrending, transformCharacterTavernTrendingCard,
+    fetchChubTrending, transformChubTrendingCard, resetChubTrendingState, chubTrendingState,
+    fetchWyvernTrending, transformWyvernTrendingCard, resetWyvernTrendingState, wyvernTrendingState,
+    fetchJannyTrending, transformJannyTrendingCard, resetJannyTrendingState, jannyTrendingState, loadMoreJannyTrending
+} from './modules/services/trendingApi.js';
 
 // Extension name and settings
 const extensionName = 'BotBrowser';
@@ -33,7 +39,8 @@ const state = {
     fuse: null,
     recentlyViewed: [],
     searchCollapsed: false,
-    cacheInitialized: false
+    cacheInitialized: false,
+    lastActiveTab: 'bots'
 };
 
 // Default settings
@@ -52,7 +59,11 @@ const defaultSettings = {
     trackStats: true,
     tagBlocklist: [],
     quillgenApiKey: '',
-    useChubLiveApi: true
+    useChubLiveApi: true,
+    useCharacterTavernLiveApi: true,
+    useMlpchagLiveApi: true,
+    useWyvernLiveApi: true,
+    autoClearFilters: true
 };
 
 // Stats storage
@@ -100,12 +111,34 @@ function applyBlurSetting() {
 }
 
 // Wrapper for showCardDetail that passes all dependencies
-async function showCardDetailWrapper(card, save = true) {
-    await showCardDetail(card, extensionName, extension_settings, state, save);
+async function showCardDetailWrapper(card, save = true, isRandom = false) {
+    await showCardDetail(card, extensionName, extension_settings, state, save, isRandom);
 
     // After modal is created, attach additional handlers that need access to state
     const detailModal = document.getElementById('bot-browser-detail-modal');
     if (!detailModal) return;
+
+    // Random buttons (only shown when viewing a random card)
+    const randomSameBtn = detailModal.querySelector('.bot-browser-random-same-btn');
+    const randomAnyBtn = detailModal.querySelector('.bot-browser-random-any-btn');
+
+    if (randomSameBtn) {
+        randomSameBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            closeDetailModal();
+            await getRandomCardFromSameService();
+        });
+    }
+
+    if (randomAnyBtn) {
+        randomAnyBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            closeDetailModal();
+            await getRandomCardFromAnyService();
+        });
+    }
 
     // Import button
     const importButton = detailModal.querySelector('.bot-browser-import-button');
@@ -255,10 +288,32 @@ function navigateToSources() {
     setupCloseButton(menu);
     setupBottomButtons(menu);
 
+    // Restore the last active tab
+    if (state.lastActiveTab && state.lastActiveTab !== 'bots') {
+        const tabButtons = menu.querySelectorAll('.bot-browser-tab');
+        const tabContents = menu.querySelectorAll('.bot-browser-tab-content');
+
+        tabButtons.forEach(btn => btn.classList.remove('active'));
+        tabContents.forEach(content => content.classList.remove('active'));
+
+        const targetTabBtn = menu.querySelector(`.bot-browser-tab[data-tab="${state.lastActiveTab}"]`);
+        const targetTabContent = menu.querySelector(`.bot-browser-tab-content[data-content="${state.lastActiveTab}"]`);
+
+        if (targetTabBtn && targetTabContent) {
+            targetTabBtn.classList.add('active');
+            targetTabContent.classList.add('active');
+
+            // Populate bookmarks if that's the tab
+            if (state.lastActiveTab === 'bookmarks') {
+                populateBookmarksTab(menu);
+            }
+        }
+    }
+
     // Apply blur setting
     applyBlurSetting();
 
-    console.log('[Bot Browser] Navigated back to sources');
+    console.log('[Bot Browser] Navigated back to sources, tab:', state.lastActiveTab);
 }
 
 // Setup tab switching
@@ -269,6 +324,9 @@ function setupTabSwitching(menu) {
     tabButtons.forEach(button => {
         button.addEventListener('click', () => {
             const targetTab = button.dataset.tab;
+
+            // Track the active tab
+            state.lastActiveTab = targetTab;
 
             tabButtons.forEach(btn => btn.classList.remove('active'));
             tabContents.forEach(content => content.classList.remove('active'));
@@ -636,6 +694,80 @@ function setupCollectionsBrowserEvents(menuContent, menu) {
     }
 }
 
+// Trending browser state
+let trendingState = {
+    source: null,
+    sort: 'popular',
+    cards: [],
+    page: 1,
+    hasMore: true
+};
+
+// Load trending source
+async function loadTrendingSource(sourceName, menu) {
+    console.log(`[Bot Browser] Loading trending source: ${sourceName}`);
+    toastr.info('Loading trending...', '', { timeOut: 2000 });
+
+    try {
+        let cards = [];
+        let displayName = 'Trending';
+
+        if (sourceName === 'character_tavern_trending') {
+            displayName = 'Character Tavern Trending';
+            const result = await fetchCharacterTavernTrending();
+            cards = (result.hits || []).map(transformCharacterTavernTrendingCard);
+
+        } else if (sourceName === 'chub_trending') {
+            displayName = 'Chub Trending';
+            resetChubTrendingState();
+            const result = await fetchChubTrending({ page: 1, limit: 48 });
+            cards = (result.nodes || []).map(transformChubTrendingCard);
+            trendingState.hasMore = result.hasMore;
+
+        } else if (sourceName === 'wyvern_trending') {
+            displayName = 'Wyvern Trending';
+            resetWyvernTrendingState();
+            const result = await fetchWyvernTrending({
+                page: 1,
+                limit: 40,
+                sort: 'nsfw-popular',
+                rating: extension_settings[extensionName].hideNsfw ? 'none' : 'all'
+            });
+            cards = (result.results || []).map(transformWyvernTrendingCard);
+            trendingState.hasMore = result.hasMore;
+
+        } else if (sourceName === 'jannyai_trending') {
+            displayName = 'JanitorAI/JannyAI Trending';
+            resetJannyTrendingState();
+            const result = await fetchJannyTrending({ page: 1, limit: 40 });
+            cards = (result.characters || []).map(transformJannyTrendingCard);
+            trendingState.hasMore = result.hasMore;
+
+        } else {
+            toastr.warning('Unknown trending source');
+            return;
+        }
+
+        trendingState.source = sourceName;
+        trendingState.cards = cards;
+        trendingState.page = 1;
+
+        console.log(`[Bot Browser] Loaded ${cards.length} trending cards from ${sourceName}`);
+
+        if (cards.length === 0) {
+            toastr.info('No trending cards found');
+            return;
+        }
+
+        // Use the standard card browser with trending cards
+        createCardBrowser(displayName, cards, state, extensionName, extension_settings, showCardDetailWrapper);
+
+    } catch (error) {
+        console.error('[Bot Browser] Error loading trending:', error);
+        toastr.error(`Failed to load trending: ${error.message}`);
+    }
+}
+
 // Setup source buttons
 function setupSourceButtons(menu) {
     const sourceButtons = menu.querySelectorAll('.bot-browser-source');
@@ -645,7 +777,19 @@ function setupSourceButtons(menu) {
             const sourceName = button.dataset.source;
             if (!sourceName) return;
 
-            console.log(`[Bot Browser] Loading source: ${sourceName}`);
+            // Track which tab this source belongs to
+            const parentTab = button.closest('.bot-browser-tab-content');
+            if (parentTab) {
+                state.lastActiveTab = parentTab.dataset.content || 'bots';
+            }
+
+            console.log(`[Bot Browser] Loading source: ${sourceName} (from tab: ${state.lastActiveTab})`);
+
+            // Auto-clear filters when switching sources (if enabled)
+            if (extension_settings[extensionName].autoClearFilters !== false) {
+                state.filters = { search: '', tags: [], creator: '' };
+                state.sortBy = extension_settings[extensionName].defaultSortBy || 'relevance';
+            }
 
             // Check if live Chub API is enabled
             const useLiveChubApi = extension_settings[extensionName].useChubLiveApi !== false;
@@ -692,11 +836,24 @@ function setupSourceButtons(menu) {
                     cards = allServiceCards.flat();
 
                     console.log(`[Bot Browser] Loaded ${cards.length} cards from ${staticServices.length} static sources`);
+                } else if (sourceName === 'my_imports') {
+                    // Load imported cards from local storage
+                    toastr.info('Loading your imports...', '', { timeOut: 2000 });
+
+                    const { loadLocalLibrary } = await import('./modules/services/localLibrary.js');
+                    cards = await loadLocalLibrary();
+
+                    if (cards.length === 0) {
+                        toastr.info('No imports yet. Import characters using Bot Browser to see them here!', 'My Imports', { timeOut: 4000 });
+                    }
+
+                    console.log(`[Bot Browser] Loaded ${cards.length} imported cards`);
                 } else if (sourceName === 'jannyai') {
                     // JannyAI uses its own live API
                     toastr.info('Loading JannyAI...', '', { timeOut: 2000 });
 
-                    const persistedSearch = loadPersistentSearch(extensionName, extension_settings, sourceName);
+                    const autoClear = extension_settings[extensionName].autoClearFilters !== false;
+                    const persistedSearch = autoClear ? null : loadPersistentSearch(extensionName, extension_settings, sourceName);
                     const sortBy = persistedSearch?.sortBy || extension_settings[extensionName].defaultSortBy || 'relevance';
 
                     // Map sort options to JannyAI format
@@ -735,22 +892,44 @@ function setupSourceButtons(menu) {
                     // Create collections browser instead of card browser
                     createCollectionsBrowser(collectionsData, menu);
                     return; // Don't call createCardBrowser
+                } else if (sourceName.endsWith('_trending')) {
+                    // Trending sources - load from respective APIs
+                    await loadTrendingSource(sourceName, menu);
+                    return;
                 } else {
                     toastr.info(`Loading ${sourceName}...`, '', { timeOut: 2000 });
-                    // Use live API for chub and chub_lorebooks if enabled
-                    const isChubService = sourceName === 'chub' || sourceName === 'chub_lorebooks';
-                    const useLive = isChubService ? useLiveChubApi : false;
 
-                    // For live Chub/lorebooks, pass persisted filters to API (including advanced filters)
+                    // Determine if live API should be used
+                    const isChubService = sourceName === 'chub' || sourceName === 'chub_lorebooks';
+                    const isCharacterTavern = sourceName === 'character_tavern';
+                    const isMlpchag = sourceName === 'mlpchag';
+                    const isWyvern = sourceName === 'wyvern' || sourceName === 'wyvern_lorebooks';
+                    const useLiveCharacterTavernApi = extension_settings[extensionName].useCharacterTavernLiveApi !== false;
+                    const useLiveMlpchagApi = extension_settings[extensionName].useMlpchagLiveApi !== false;
+                    const useWyvernLiveApi = extension_settings[extensionName].useWyvernLiveApi !== false;
+
+                    let useLive = false;
+                    if (isChubService) {
+                        useLive = useLiveChubApi;
+                    } else if (isCharacterTavern) {
+                        useLive = useLiveCharacterTavernApi;
+                    } else if (isMlpchag) {
+                        useLive = useLiveMlpchagApi;
+                    } else if (isWyvern) {
+                        useLive = useWyvernLiveApi;
+                    }
+
+                    // For live APIs, pass persisted filters to API (including advanced filters)
                     let loadOptions = {};
-                    if (isChubService && useLive) {
-                        const persistedSearch = loadPersistentSearch(extensionName, extension_settings, sourceName);
+                    if ((isChubService || isCharacterTavern || isWyvern) && useLive) {
+                        const autoClear = extension_settings[extensionName].autoClearFilters !== false;
+                        const persistedSearch = autoClear ? null : loadPersistentSearch(extensionName, extension_settings, sourceName);
                         const sortBy = persistedSearch?.sortBy || extension_settings[extensionName].defaultSortBy || 'relevance';
                         loadOptions = {
                             sort: sortBy,
                             search: persistedSearch?.filters?.search || '',
                             hideNsfw: extension_settings[extensionName].hideNsfw,
-                            ...(persistedSearch?.advancedFilters || {})
+                            ...(autoClear ? {} : (persistedSearch?.advancedFilters || {}))
                         };
                     }
 
@@ -808,97 +987,79 @@ function setupBottomButtons(menu) {
     });
 }
 
-// Play service roulette animation and select random card
-async function playServiceRoulette(menu) {
-    const serviceNames = ['risuai_realm', 'webring', 'nyai_me', 'chub', 'character_tavern', 'catbox', 'anchorhold', 'mlpchag', 'desuarchive', 'jannyai'];
-    const serviceButtons = menu.querySelectorAll('.bot-browser-source[data-source]');
+// Store current random service for "same source" random button
+let currentRandomService = null;
 
-    // Filter out the "all" button and lorebook buttons
-    const validButtons = Array.from(serviceButtons).filter(btn => {
-        const source = btn.dataset.source;
-        return serviceNames.includes(source);
-    });
+// Play service roulette - instant random selection (no animation)
+async function playServiceRoulette(menu, preferSameService = null) {
+    const serviceNames = ['risuai_realm', 'webring', 'nyai_me', 'chub', 'character_tavern', 'wyvern', 'catbox', 'anchorhold', 'mlpchag', 'desuarchive', 'jannyai'];
 
-    if (validButtons.length === 0) return;
-
-    // Disable the random button during animation
+    // Disable the random button during loading
     const randomButtons = menu.querySelectorAll('.bot-browser-random');
     randomButtons.forEach(btn => btn.disabled = true);
 
-    // Animation parameters
-    let currentIndex = 0;
-    let interval = 50; // Start fast
-    const maxInterval = 300; // End slow
-    const intervalIncrease = 1.15; // Speed decrease factor
-    const totalSpins = 15 + Math.floor(Math.random() * 10); // 15-24 spins
-    let spinCount = 0;
+    try {
+        // Select service - either same as before or random
+        let selectedService;
+        if (preferSameService && serviceNames.includes(preferSameService)) {
+            selectedService = preferSameService;
+        } else {
+            selectedService = serviceNames[Math.floor(Math.random() * serviceNames.length)];
+        }
 
-    // Remove any existing highlights
-    validButtons.forEach(btn => btn.classList.remove('roulette-highlight'));
+        // Store for "same source" button
+        currentRandomService = selectedService;
 
-    return new Promise((resolve) => {
-        const spin = () => {
-            // Remove previous highlight
-            validButtons.forEach(btn => btn.classList.remove('roulette-highlight'));
+        // Load a random card from the selected service
+        let cards;
 
-            // Add highlight to current button
-            validButtons[currentIndex].classList.add('roulette-highlight');
+        // Special handling for JannyAI - use live API
+        if (selectedService === 'jannyai') {
+            const searchResults = await searchJannyCharacters({
+                search: '',
+                page: Math.floor(Math.random() * 10) + 1, // Random page 1-10
+                limit: 40,
+                sort: 'createdAtStamp:desc'
+            });
+            const results = searchResults.results?.[0] || {};
+            cards = (results.hits || []).map(hit => transformJannyCard(hit));
+        } else {
+            cards = await loadServiceIndex(selectedService);
+        }
 
-            // Move to next button
-            currentIndex = (currentIndex + 1) % validButtons.length;
-            spinCount++;
+        const randomCard = await getRandomCard(selectedService, cards, loadServiceIndex);
 
-            if (spinCount >= totalSpins) {
-                // Animation complete - select the highlighted service
-                setTimeout(async () => {
-                    const selectedButton = validButtons.find(btn => btn.classList.contains('roulette-highlight'));
-                    const selectedService = selectedButton.dataset.source;
+        if (randomCard) {
+            await showCardDetailWrapper(randomCard, true, true); // save=true, isRandom=true
+        } else {
+            toastr.warning('No cards available from this service');
+        }
+    } catch (error) {
+        console.error('[Bot Browser] Error loading random card:', error);
+        toastr.error('Failed to load random card');
+    }
 
-                    // Load a random card from the selected service
-                    try {
-                        let cards;
+    // Re-enable buttons
+    randomButtons.forEach(btn => btn.disabled = false);
+}
 
-                        // Special handling for JannyAI - use live API
-                        if (selectedService === 'jannyai') {
-                            const searchResults = await searchJannyCharacters({
-                                search: '',
-                                page: Math.floor(Math.random() * 10) + 1, // Random page 1-10
-                                limit: 40,
-                                sort: 'createdAtStamp:desc'
-                            });
-                            const results = searchResults.results?.[0] || {};
-                            cards = (results.hits || []).map(hit => transformJannyCard(hit));
-                        } else {
-                            cards = await loadServiceIndex(selectedService);
-                        }
+// Get random card from any service (for "any source" button)
+async function getRandomCardFromAnyService() {
+    const menu = document.getElementById('bot-browser-menu');
+    if (menu) {
+        await playServiceRoulette(menu, null);
+    }
+}
 
-                        const randomCard = await getRandomCard(selectedService, cards, loadServiceIndex);
-
-                        if (randomCard) {
-                            await showCardDetailWrapper(randomCard);
-                        } else {
-                            toastr.warning('No cards available from this service');
-                        }
-                    } catch (error) {
-                        console.error('[Bot Browser] Error loading random card:', error);
-                        toastr.error('Failed to load random card');
-                    }
-
-                    // Remove highlight and re-enable buttons
-                    validButtons.forEach(btn => btn.classList.remove('roulette-highlight'));
-                    randomButtons.forEach(btn => btn.disabled = false);
-                    resolve();
-                }, 500);
-            } else {
-                // Continue spinning with increasing interval (slowing down)
-                interval = Math.min(interval * intervalIncrease, maxInterval);
-                setTimeout(spin, interval);
-            }
-        };
-
-        // Start the animation
-        spin();
-    });
+// Get random card from same service (for "same source" button)
+async function getRandomCardFromSameService() {
+    const menu = document.getElementById('bot-browser-menu');
+    if (menu && currentRandomService) {
+        await playServiceRoulette(menu, currentRandomService);
+    } else if (menu) {
+        // Fallback to any if no current service
+        await playServiceRoulette(menu, null);
+    }
 }
 
 // Show settings modal
@@ -1002,6 +1163,16 @@ function showSettingsModal() {
                         </div>
 
                         <div class="bb-setting-group">
+                            <label class="bb-checkbox">
+                                <input type="checkbox" id="bb-setting-auto-clear-filters" ${settings.autoClearFilters !== false ? 'checked' : ''}>
+                                <span>Clear Filters on Source Change</span>
+                            </label>
+                            <small style="color: rgba(255,255,255,0.5); display: block; margin-top: 5px; margin-left: 28px;">
+                                Auto-clears search, tags, and sort when switching sources
+                            </small>
+                        </div>
+
+                        <div class="bb-setting-group">
                             <label>Default Sort:</label>
                             <select id="bb-setting-default-sort">
                                 <option value="relevance" ${settings.defaultSortBy === 'relevance' ? 'selected' : ''}>Relevance</option>
@@ -1023,6 +1194,13 @@ function showSettingsModal() {
                         <button id="bb-clear-search" class="bb-setting-action-btn danger">
                             <i class="fa-solid fa-eraser"></i> Clear Search History
                         </button>
+
+                        <button id="bb-clear-imports" class="bb-setting-action-btn danger" style="margin-top: 10px;">
+                            <i class="fa-solid fa-trash-can"></i> Clear Import Tracking
+                        </button>
+                        <small style="color: rgba(255,255,255,0.5); display: block; margin-top: 5px;">
+                            Clears the "My Imports" list (doesn't delete actual characters)
+                        </small>
                     </div>
 
                     <!-- API TAB -->
@@ -1048,6 +1226,51 @@ function showSettingsModal() {
                                 <strong>Archive</strong>
                                 <small>Static index, works if Chub goes down</small>
                             </div>
+                        </div>
+
+                        <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
+
+                        <div class="bb-setting-group" style="text-align: center;">
+                            <div style="display: inline-block; background: linear-gradient(135deg, #2d1b4e, #1a1a2e); border-radius: 8px; padding: 8px 16px; margin-bottom: 10px;">
+                                <span style="font-size: 18px; font-weight: bold; color: #c9a0ff;">Character Tavern</span>
+                            </div>
+                            <label class="bb-checkbox" style="justify-content: center;">
+                                <input type="checkbox" id="bb-setting-ct-live-api" ${settings.useCharacterTavernLiveApi ? 'checked' : ''}>
+                                <span>Use Live Character Tavern API</span>
+                            </label>
+                            <small style="color: rgba(255,255,255,0.5); display: block; margin-top: 8px;">
+                                Enable for live search with advanced filters (token range, lorebook, OC)
+                            </small>
+                        </div>
+
+                        <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
+
+                        <div class="bb-setting-group" style="text-align: center;">
+                            <div style="display: inline-block; background: linear-gradient(135deg, #2d1b4e, #1a2e1a); border-radius: 8px; padding: 8px 16px; margin-bottom: 10px;">
+                                <span style="font-size: 18px; font-weight: bold; color: #c9ffda;">MLPChag</span>
+                            </div>
+                            <label class="bb-checkbox" style="justify-content: center;">
+                                <input type="checkbox" id="bb-setting-mlpchag-live-api" ${settings.useMlpchagLiveApi ? 'checked' : ''}>
+                                <span>Use Live MLPChag API</span>
+                            </label>
+                            <small style="color: rgba(255,255,255,0.5); display: block; margin-top: 8px;">
+                                Enable to fetch characters directly from mlpchag.neocities.org
+                            </small>
+                        </div>
+
+                        <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
+
+                        <div class="bb-setting-group" style="text-align: center;">
+                            <div style="display: inline-block; background: linear-gradient(135deg, #4a1d6e, #1a2e4e); border-radius: 8px; padding: 8px 16px; margin-bottom: 10px;">
+                                <span style="font-size: 18px; font-weight: bold; color: #d4a0ff;">Wyvern Chat</span>
+                            </div>
+                            <label class="bb-checkbox" style="justify-content: center;">
+                                <input type="checkbox" id="bb-setting-wyvern-live-api" ${settings.useWyvernLiveApi !== false ? 'checked' : ''}>
+                                <span>Use Live Wyvern API</span>
+                            </label>
+                            <small style="color: rgba(255,255,255,0.5); display: block; margin-top: 8px;">
+                                Fetch characters and lorebooks from api.wyvern.chat
+                            </small>
                         </div>
 
                         <hr style="border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 20px 0;">
@@ -1148,11 +1371,19 @@ function showSettingsModal() {
         }
     });
 
+    document.getElementById('bb-clear-imports').addEventListener('click', () => {
+        if (confirm('Clear import tracking? This removes the "My Imports" list but does not delete any actual characters.')) {
+            clearImportedCards();
+            toastr.success('Import tracking cleared');
+        }
+    });
+
     // Save button
     document.getElementById('bb-settings-save').addEventListener('click', () => {
         settings.recentlyViewedEnabled = document.getElementById('bb-setting-recently-viewed').checked;
         settings.maxRecentlyViewed = parseInt(document.getElementById('bb-setting-max-recent').value);
         settings.persistentSearchEnabled = document.getElementById('bb-setting-persistent-search').checked;
+        settings.autoClearFilters = document.getElementById('bb-setting-auto-clear-filters').checked;
         settings.defaultSortBy = document.getElementById('bb-setting-default-sort').value;
         settings.fuzzySearchThreshold = parseInt(document.getElementById('bb-setting-threshold').value) / 100;
         settings.cardsPerPage = parseInt(document.getElementById('bb-setting-cards-per-page').value);
@@ -1163,6 +1394,9 @@ function showSettingsModal() {
         const blocklistText = document.getElementById('bb-setting-tag-blocklist').value;
         settings.tagBlocklist = blocklistText.split('\n').map(l => l.trim()).filter(l => l.length > 0);
         settings.useChubLiveApi = document.getElementById('bb-setting-chub-live-api').checked;
+        settings.useCharacterTavernLiveApi = document.getElementById('bb-setting-ct-live-api').checked;
+        settings.useMlpchagLiveApi = document.getElementById('bb-setting-mlpchag-live-api').checked;
+        settings.useWyvernLiveApi = document.getElementById('bb-setting-wyvern-live-api').checked;
 
         // QuillGen settings
         const oldApiKey = settings.quillgenApiKey;

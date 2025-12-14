@@ -198,15 +198,7 @@ function getImageObserver() {
                             const testImg = new Image();
 
                             testImg.onerror = () => {
-                                // Image failed to load
-                                // Skip fetch for JannyAI images - their CDN blocks CORS
-                                // The image might actually work for display but fail validation
-                                if (imageUrl.includes('image.jannyai.com')) {
-                                    // For JannyAI, show a generic fallback silently (don't spam console)
-                                    showImageError(imageDiv, 'Unavailable', imageUrl, true);
-                                    return;
-                                }
-
+                                // Image failed to load - show fallback
                                 fetch(imageUrl, { method: 'HEAD' })
                                     .then(response => {
                                         const errorCode = response.ok ? 'Unknown Error' : `Error ${response.status}`;

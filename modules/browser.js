@@ -3,8 +3,15 @@ import { debounce, escapeHTML } from './utils/utils.js';
 import { createBrowserHeader, createCardGrid, createCardHTML, createBottomActions } from './templates/templates.js';
 import { getAllTags, getAllCreators, filterCards, sortCards, deduplicateCards, validateCardImages } from './services/cards.js';
 import { loadPersistentSearch, savePersistentSearch, loadSearchCollapsed, saveSearchCollapsed } from './storage/storage.js';
-import { loadMoreChubCards, loadMoreChubLorebooks, getChubApiState, getChubLorebooksApiState, resetChubApiState, loadServiceIndex } from './services/cache.js';
+import { loadMoreChubCards, loadMoreChubLorebooks, getChubApiState, getChubLorebooksApiState, resetChubApiState, loadServiceIndex, getCharacterTavernApiState, resetCharacterTavernState, loadMoreCharacterTavernCards, getWyvernApiState, getWyvernLorebooksApiState, resetWyvernApiState, resetWyvernLorebooksApiState, loadMoreWyvernCards, loadMoreWyvernLorebooksWrapper } from './services/cache.js';
+import { searchWyvernCharacters, searchWyvernLorebooks, transformWyvernCard, transformWyvernLorebook } from './services/wyvernApi.js';
 import { searchJannyCharacters, transformJannyCard } from './services/jannyApi.js';
+import { searchCharacterTavern } from './services/characterTavernApi.js';
+import {
+    fetchChubTrending, transformChubTrendingCard, chubTrendingState, resetChubTrendingState,
+    fetchWyvernTrending, transformWyvernTrendingCard, wyvernTrendingState, resetWyvernTrendingState,
+    fetchJannyTrending, transformJannyTrendingCard, jannyTrendingState, resetJannyTrendingState, loadMoreJannyTrending
+} from './services/trendingApi.js';
 
 // JannyAI API state for pagination
 let jannyApiState = {
@@ -73,6 +80,33 @@ export function createCardBrowser(serviceName, cards, state, extensionName, exte
         resetJannyApiState();
     }
 
+    // Detect if this is Character Tavern with live API enabled
+    const useCharacterTavernLiveApi = extension_settings[extensionName].useCharacterTavernLiveApi === true;
+    state.isCharacterTavern = serviceName === 'character_tavern' && useCharacterTavernLiveApi && cards.some(c => c.isCharacterTavern || c.sourceService === 'character_tavern_live');
+    if (state.isCharacterTavern) {
+        resetCharacterTavernState();
+    }
+
+    // Detect if this is Wyvern with live API enabled
+    const useWyvernLiveApi = extension_settings[extensionName].useWyvernLiveApi !== false;
+    const isWyvernService = serviceName === 'wyvern' || serviceName === 'wyvern_lorebooks';
+    state.isWyvern = isWyvernService && useWyvernLiveApi && cards.some(c => c.isWyvern || c.sourceService === 'wyvern_live' || c.sourceService === 'wyvern_lorebooks_live');
+    state.isWyvernLorebooks = serviceName === 'wyvern_lorebooks';
+    if (state.isWyvern) {
+        if (state.isWyvernLorebooks) {
+            resetWyvernLorebooksApiState();
+        } else {
+            resetWyvernApiState();
+        }
+    }
+
+    // Detect trending sources via card sourceService
+    const firstCard = cards[0];
+    state.isTrending = firstCard?.isTrending || false;
+    state.isJannyAITrending = firstCard?.sourceService === 'jannyai_trending';
+    state.isChubTrending = firstCard?.sourceService === 'chub_trending';
+    state.isWyvernTrending = firstCard?.sourceService === 'wyvern_trending';
+
     // Deduplicate cards before storing, and preserve or add the source service name
     const cardsWithSource = cards.map(card => ({
         ...card,
@@ -80,13 +114,14 @@ export function createCardBrowser(serviceName, cards, state, extensionName, exte
     }));
     state.currentCards = deduplicateCards(cardsWithSource);
 
-    // Always load persistent search for this service (each service has its own saved filters)
-    const savedSearch = loadPersistentSearch(extensionName, extension_settings, serviceName);
+    // Load persistent search for this service ONLY if autoClearFilters is disabled
+    const autoClearFilters = extension_settings[extensionName].autoClearFilters !== false;
+    const savedSearch = autoClearFilters ? null : loadPersistentSearch(extensionName, extension_settings, serviceName);
     if (savedSearch) {
         state.filters = savedSearch.filters || { search: '', tags: [], creator: '' };
         state.sortBy = savedSearch.sortBy || extension_settings[extensionName].defaultSortBy || 'relevance';
     } else {
-        // Reset filters for services without saved search
+        // Reset filters - either autoClearFilters is on OR no saved search exists
         state.filters = { search: '', tags: [], creator: '' };
         state.sortBy = extension_settings[extensionName].defaultSortBy || 'relevance';
     }
@@ -123,6 +158,29 @@ export function createCardBrowser(serviceName, cards, state, extensionName, exte
         };
     } else {
         state.jannyAdvancedFilters = null;
+    }
+
+    // Initialize advanced filters for Character Tavern
+    if (state.isCharacterTavern) {
+        state.ctAdvancedFilters = savedSearch?.ctAdvancedFilters || {
+            minTokens: null,
+            maxTokens: null,
+            tags: [],
+            hasLorebook: false,
+            isOC: false
+        };
+    } else {
+        state.ctAdvancedFilters = null;
+    }
+
+    // Initialize advanced filters for Wyvern
+    if (state.isWyvern) {
+        state.wyvernAdvancedFilters = savedSearch?.wyvernAdvancedFilters || {
+            rating: 'all',
+            tags: []
+        };
+    } else {
+        state.wyvernAdvancedFilters = null;
     }
 
     // Lazy initialize Fuse.js only when search is used (performance optimization)
@@ -185,13 +243,17 @@ export function createCardBrowser(serviceName, cards, state, extensionName, exte
     const menuContent = menu.querySelector('.bot-browser-content');
     const hideNsfw = extension_settings[extensionName].hideNsfw || false;
     const nsfwText = hideNsfw ? ' (after hiding NSFW)' : '';
-    // For live APIs (Chub/JannyAI), show "Browsing X API" instead of count (we don't know total)
+    // For live APIs (Chub/JannyAI/CT/Wyvern), show "Browsing X API" instead of count (we don't know total)
     const cardCountText = state.isLiveChub
         ? `Browsing Chub API${nsfwText}`
         : state.isJannyAI
             ? `Browsing JannyAI${nsfwText}`
-            : `${cardsWithImages.length} card${cardsWithImages.length !== 1 ? 's' : ''} found${nsfwText}`;
-    menuContent.innerHTML = createBrowserHeader(serviceDisplayName, state.filters.search, cardCountText, searchCollapsed, hideNsfw, state.isLiveChub, state.advancedFilters, state.isJannyAI, state.jannyAdvancedFilters);
+            : state.isCharacterTavern
+                ? `Browsing Character Tavern${nsfwText}`
+                : state.isWyvern
+                    ? `Browsing Wyvern Chat${nsfwText}`
+                    : `${cardsWithImages.length} card${cardsWithImages.length !== 1 ? 's' : ''} found${nsfwText}`;
+    menuContent.innerHTML = createBrowserHeader(serviceDisplayName, state.filters.search, cardCountText, searchCollapsed, hideNsfw, state.isLiveChub, state.advancedFilters, state.isJannyAI, state.jannyAdvancedFilters, state.isCharacterTavern, state.ctAdvancedFilters, state.isWyvern, state.wyvernAdvancedFilters);
 
     // Render first page immediately for better perceived performance
     renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
@@ -219,6 +281,16 @@ export function createCardBrowser(serviceName, cards, state, extensionName, exte
     // Add advanced filter event listeners for JannyAI
     if (state.isJannyAI) {
         setupJannyAdvancedFilterListeners(menuContent, state, extensionName, extension_settings, showCardDetailFunc);
+    }
+
+    // Add advanced filter event listeners for Character Tavern
+    if (state.isCharacterTavern) {
+        setupCTAdvancedFilterListeners(menuContent, state, extensionName, extension_settings, showCardDetailFunc);
+    }
+
+    // Add advanced filter event listeners for Wyvern
+    if (state.isWyvern) {
+        setupWyvernAdvancedFilterListeners(menuContent, state, extensionName, extension_settings, showCardDetailFunc);
     }
 
     console.log('[Bot Browser] Card browser created with', sortedCards.length, 'cards');
@@ -458,6 +530,91 @@ function setupBrowserEventListeners(menuContent, state, extensionName, extension
             } catch (error) {
                 console.error('[Bot Browser] JannyAI search failed:', error);
             }
+        } else if (state.isCharacterTavern) {
+            // For Character Tavern, trigger fresh API search
+            console.log('[Bot Browser] Triggering Character Tavern search:', state.filters.search);
+            try {
+                resetCharacterTavernState();
+
+                const cards = await searchCharacterTavern({
+                    query: state.filters.search,
+                    page: 1,
+                    limit: 30,
+                    hasLorebook: state.ctAdvancedFilters?.hasLorebook || undefined,
+                    isOC: state.ctAdvancedFilters?.isOC || undefined,
+                    minTokens: state.ctAdvancedFilters?.minTokens || undefined,
+                    maxTokens: state.ctAdvancedFilters?.maxTokens || undefined,
+                    tags: state.ctAdvancedFilters?.tags || []
+                });
+
+                state.currentCards = cards;
+
+                // For CT, search is done server-side by the API
+                // Clear Fuse to prevent stale client-side search from overriding API results
+                state.fuse = null;
+
+                // Apply client-side filters (blocklist, NSFW) and sort
+                const filteredCards = applyClientSideFilters(cards, state, extensionName, extension_settings);
+                state.filteredCards = sortCards(filteredCards, state.sortBy);
+                state.currentPage = 1; // Reset to page 1 on new search
+
+                updateCachedFiltersAndDropdowns(state, menuContent);
+                renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+            } catch (error) {
+                console.error('[Bot Browser] Character Tavern search failed:', error);
+            }
+        } else if (state.isWyvern) {
+            // For Wyvern, trigger fresh API search
+            console.log('[Bot Browser] Triggering Wyvern search:', state.filters.search);
+            try {
+                if (state.isWyvernLorebooks) {
+                    resetWyvernLorebooksApiState();
+                } else {
+                    resetWyvernApiState();
+                }
+
+                // Map sort options to Wyvern format
+                let wyvernSort = 'votes';
+                let wyvernOrder = 'DESC';
+                switch (state.sortBy) {
+                    case 'date_desc': wyvernSort = 'created_at'; wyvernOrder = 'DESC'; break;
+                    case 'date_asc': wyvernSort = 'created_at'; wyvernOrder = 'ASC'; break;
+                    case 'name_asc': wyvernSort = 'name'; wyvernOrder = 'ASC'; break;
+                    case 'name_desc': wyvernSort = 'name'; wyvernOrder = 'DESC'; break;
+                    default: wyvernSort = 'votes'; wyvernOrder = 'DESC';
+                }
+
+                const searchFunc = state.isWyvernLorebooks ? searchWyvernLorebooks : searchWyvernCharacters;
+                const transformFunc = state.isWyvernLorebooks ? transformWyvernLorebook : transformWyvernCard;
+
+                const result = await searchFunc({
+                    search: state.filters.search,
+                    page: 1,
+                    limit: 40,
+                    sort: wyvernSort,
+                    order: wyvernOrder,
+                    tags: state.wyvernAdvancedFilters?.tags || [],
+                    rating: state.wyvernAdvancedFilters?.rating !== 'all' ? state.wyvernAdvancedFilters?.rating : undefined,
+                    hideNsfw: !state.wyvernAdvancedFilters?.rating ? extension_settings[extensionName].hideNsfw : false
+                });
+
+                const cards = result.results.map(transformFunc);
+                state.currentCards = cards;
+
+                // For Wyvern, search is done server-side by the API
+                // Clear Fuse to prevent stale client-side search from overriding API results
+                state.fuse = null;
+
+                // Apply client-side filters (blocklist) and sort
+                const filteredCards = applyClientSideFilters(cards, state, extensionName, extension_settings);
+                state.filteredCards = sortCards(filteredCards, state.sortBy);
+                state.currentPage = 1; // Reset to page 1 on new search
+
+                updateCachedFiltersAndDropdowns(state, menuContent);
+                renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+            } catch (error) {
+                console.error('[Bot Browser] Wyvern search failed:', error);
+            }
         } else {
             // Lazy initialize Fuse.js when user starts searching
             if (state.filters.search && !state.fuse) {
@@ -467,7 +624,7 @@ function setupBrowserEventListeners(menuContent, state, extensionName, extension
             refreshCardGrid(state, extensionName, extension_settings, showCardDetailFunc);
         }
 
-        savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters);
+        savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters, state.jannyAdvancedFilters, state.ctAdvancedFilters, state.wyvernAdvancedFilters);
     }, 500));
 
     // Custom Tag Filter Logic
@@ -557,7 +714,7 @@ function setupBrowserEventListeners(menuContent, state, extensionName, extension
             if (requireGreetingsCheckbox) requireGreetingsCheckbox.checked = false;
         }
 
-        savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters);
+        savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters, state.jannyAdvancedFilters, state.ctAdvancedFilters, state.wyvernAdvancedFilters);
 
         // For live Chub, make a fresh API call with cleared filters
         if (state.isLiveChub) {
@@ -694,7 +851,7 @@ function setupAdvancedFilterListeners(menuContent, state, extensionName, extensi
         }
 
         // Save to persistent search
-        savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters);
+        savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters, state.jannyAdvancedFilters, state.ctAdvancedFilters, state.wyvernAdvancedFilters);
     });
 }
 
@@ -790,7 +947,188 @@ function setupJannyAdvancedFilterListeners(menuContent, state, extensionName, ex
         }
 
         // Save to persistent search (include jannyAdvancedFilters)
-        savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters, state.jannyAdvancedFilters);
+        savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters, state.jannyAdvancedFilters, state.ctAdvancedFilters, state.wyvernAdvancedFilters);
+    });
+}
+
+// Setup Character Tavern advanced filter listeners
+function setupCTAdvancedFilterListeners(menuContent, state, extensionName, extension_settings, showCardDetailFunc) {
+    const toggleBtn = menuContent.querySelector('.bot-browser-toggle-advanced-ct');
+    const advancedSection = menuContent.querySelector('.bot-browser-advanced-filters-ct');
+    const applyBtn = menuContent.querySelector('.bot-browser-apply-advanced-ct');
+
+    if (!toggleBtn || !advancedSection) return;
+
+    // Toggle collapse
+    toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        advancedSection.classList.toggle('collapsed');
+        const toggleIcon = toggleBtn.querySelector('.toggle-icon');
+        toggleIcon.classList.toggle('fa-chevron-down');
+        toggleIcon.classList.toggle('fa-chevron-up');
+    });
+
+    // Apply filters button
+    applyBtn.addEventListener('click', async () => {
+        // Collect CT advanced filter values
+        const tagsInput = menuContent.querySelector('.bot-browser-ct-tags').value.trim();
+        const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+        state.ctAdvancedFilters = {
+            minTokens: parseInt(menuContent.querySelector('.bot-browser-ct-min-tokens').value) || null,
+            maxTokens: parseInt(menuContent.querySelector('.bot-browser-ct-max-tokens').value) || null,
+            tags: tags,
+            hasLorebook: menuContent.querySelector('.bot-browser-ct-has-lorebook').checked,
+            isOC: menuContent.querySelector('.bot-browser-ct-is-oc').checked
+        };
+
+        console.log('[Bot Browser] Applying Character Tavern advanced filters:', state.ctAdvancedFilters);
+
+        // Trigger new API search with all filters
+        try {
+            applyBtn.disabled = true;
+            applyBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Searching...';
+
+            resetCharacterTavernState();
+
+            const cards = await searchCharacterTavern({
+                query: state.filters.search,
+                page: 1,
+                limit: 30,
+                hasLorebook: state.ctAdvancedFilters.hasLorebook || undefined,
+                isOC: state.ctAdvancedFilters.isOC || undefined,
+                minTokens: state.ctAdvancedFilters.minTokens || undefined,
+                maxTokens: state.ctAdvancedFilters.maxTokens || undefined,
+                tags: state.ctAdvancedFilters.tags
+            });
+
+            state.currentCards = cards;
+
+            // For CT, search is done server-side by the API
+            // Clear Fuse to prevent stale client-side search from overriding API results
+            state.fuse = null;
+
+            // Apply client-side filters (blocklist, NSFW) and sort
+            const filteredCards = applyClientSideFilters(cards, state, extensionName, extension_settings);
+            state.filteredCards = sortCards(filteredCards, state.sortBy);
+            state.currentPage = 1;
+
+            updateCachedFiltersAndDropdowns(state, menuContent);
+            renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+
+            const countContainer = menuContent.querySelector('.bot-browser-results-count');
+            if (countContainer) {
+                countContainer.textContent = `Browsing Character Tavern (${filteredCards.length} cards loaded)`;
+            }
+        } catch (error) {
+            console.error('[Bot Browser] Character Tavern advanced filter search failed:', error);
+            toastr.error('Failed to apply filters: ' + error.message);
+        } finally {
+            applyBtn.disabled = false;
+            applyBtn.innerHTML = 'Apply Filters';
+        }
+
+        // Save to persistent search (include ctAdvancedFilters)
+        savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters, state.jannyAdvancedFilters, state.ctAdvancedFilters, state.wyvernAdvancedFilters);
+    });
+}
+
+// Setup Wyvern advanced filter listeners
+function setupWyvernAdvancedFilterListeners(menuContent, state, extensionName, extension_settings, showCardDetailFunc) {
+    const toggleBtn = menuContent.querySelector('.bot-browser-toggle-advanced-wyvern');
+    const advancedSection = menuContent.querySelector('.bot-browser-advanced-filters-wyvern');
+    const applyBtn = menuContent.querySelector('.bot-browser-apply-advanced-wyvern');
+
+    if (!toggleBtn || !advancedSection) return;
+
+    // Toggle collapse
+    toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        e.preventDefault();
+        advancedSection.classList.toggle('collapsed');
+        const toggleIcon = toggleBtn.querySelector('.toggle-icon');
+        toggleIcon.classList.toggle('fa-chevron-down');
+        toggleIcon.classList.toggle('fa-chevron-up');
+    });
+
+    // Apply filters button
+    applyBtn.addEventListener('click', async () => {
+        // Collect Wyvern advanced filter values
+        const tagsInput = menuContent.querySelector('.bot-browser-wyvern-tags').value.trim();
+        const tags = tagsInput ? tagsInput.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+        state.wyvernAdvancedFilters = {
+            rating: menuContent.querySelector('.bot-browser-wyvern-rating').value,
+            tags: tags
+        };
+
+        console.log('[Bot Browser] Applying Wyvern advanced filters:', state.wyvernAdvancedFilters);
+
+        // Trigger new API search with all filters
+        try {
+            applyBtn.disabled = true;
+            applyBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Searching...';
+
+            if (state.isWyvernLorebooks) {
+                resetWyvernLorebooksApiState();
+            } else {
+                resetWyvernApiState();
+            }
+
+            // Map sort options to Wyvern format
+            let wyvernSort = 'votes';
+            let wyvernOrder = 'DESC';
+            switch (state.sortBy) {
+                case 'date_desc': wyvernSort = 'created_at'; wyvernOrder = 'DESC'; break;
+                case 'date_asc': wyvernSort = 'created_at'; wyvernOrder = 'ASC'; break;
+                case 'name_asc': wyvernSort = 'name'; wyvernOrder = 'ASC'; break;
+                case 'name_desc': wyvernSort = 'name'; wyvernOrder = 'DESC'; break;
+                default: wyvernSort = 'votes'; wyvernOrder = 'DESC';
+            }
+
+            const searchFunc = state.isWyvernLorebooks ? searchWyvernLorebooks : searchWyvernCharacters;
+            const transformFunc = state.isWyvernLorebooks ? transformWyvernLorebook : transformWyvernCard;
+
+            const result = await searchFunc({
+                search: state.filters.search,
+                page: 1,
+                limit: 40,
+                sort: wyvernSort,
+                order: wyvernOrder,
+                tags: state.wyvernAdvancedFilters.tags,
+                rating: state.wyvernAdvancedFilters.rating !== 'all' ? state.wyvernAdvancedFilters.rating : undefined,
+                hideNsfw: false // Don't use hideNsfw when explicit rating is set
+            });
+
+            const cards = result.results.map(transformFunc);
+            state.currentCards = cards;
+
+            // Clear Fuse for server-side search
+            state.fuse = null;
+
+            // Apply client-side filters (blocklist, etc.) but NOT NSFW filter when rating is explicitly set
+            const filteredCards = applyClientSideFilters(cards, state, extensionName, extension_settings);
+            state.filteredCards = sortCards(filteredCards, state.sortBy);
+            state.currentPage = 1;
+
+            updateCachedFiltersAndDropdowns(state, menuContent);
+            renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+
+            const countContainer = menuContent.querySelector('.bot-browser-results-count');
+            if (countContainer) {
+                countContainer.textContent = `Browsing Wyvern Chat (${filteredCards.length} cards loaded)`;
+            }
+        } catch (error) {
+            console.error('[Bot Browser] Wyvern advanced filter search failed:', error);
+            toastr.error('Failed to apply filters: ' + error.message);
+        } finally {
+            applyBtn.disabled = false;
+            applyBtn.innerHTML = 'Apply Filters';
+        }
+
+        // Save to persistent search
+        savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters, state.jannyAdvancedFilters, state.ctAdvancedFilters, state.wyvernAdvancedFilters);
     });
 }
 
@@ -805,25 +1143,56 @@ function setupCustomDropdown(container, state, filterType, extensionName, extens
     // Sort dropdown doesn't have search
     const hasSearch = searchInput !== null;
 
-    // Toggle dropdown
-    trigger.addEventListener('click', (e) => {
+    // Toggle dropdown - shared handler for both click and touch
+    const toggleDropdown = (e) => {
         e.stopPropagation();
+        e.preventDefault();
         const isOpen = dropdown.classList.contains('open');
 
         // Close all other dropdowns
         document.querySelectorAll('.bot-browser-multi-select-dropdown').forEach(d => {
-            if (d !== dropdown) d.classList.remove('open');
+            if (d !== dropdown) {
+                d.classList.remove('open');
+                d.style.position = '';
+                d.style.top = '';
+                d.style.left = '';
+                d.style.right = '';
+                d.style.width = '';
+            }
         });
 
         if (!isOpen) {
             dropdown.classList.add('open');
+
+            // On mobile, use fixed positioning to escape overflow containers
+            const isMobile = window.innerWidth <= 600;
+            if (isMobile) {
+                const triggerRect = trigger.getBoundingClientRect();
+                dropdown.style.position = 'fixed';
+                dropdown.style.top = `${triggerRect.bottom + 4}px`;
+                dropdown.style.left = '5vw';
+                dropdown.style.right = '5vw';
+                dropdown.style.width = 'auto';
+            }
+
             if (hasSearch && searchInput) {
-                searchInput.focus();
+                // Delay focus on mobile to prevent keyboard issues
+                setTimeout(() => searchInput.focus(), 100);
             }
         } else {
             dropdown.classList.remove('open');
+            // Reset positioning
+            dropdown.style.position = '';
+            dropdown.style.top = '';
+            dropdown.style.left = '';
+            dropdown.style.right = '';
+            dropdown.style.width = '';
         }
-    });
+    };
+
+    // Add both click and touch handlers for mobile compatibility
+    trigger.addEventListener('click', toggleDropdown);
+    trigger.addEventListener('touchend', toggleDropdown, { passive: false });
 
     // Search functionality (only for dropdowns with search)
     if (hasSearch && searchInput) {
@@ -831,6 +1200,11 @@ function setupCustomDropdown(container, state, filterType, extensionName, extens
         searchInput.addEventListener('click', (e) => {
             e.stopPropagation();
         });
+
+        // Also handle touch to prevent dropdown close on mobile
+        searchInput.addEventListener('touchend', (e) => {
+            e.stopPropagation();
+        }, { passive: false });
 
         // Search functionality
         searchInput.addEventListener('input', (e) => {
@@ -848,9 +1222,10 @@ function setupCustomDropdown(container, state, filterType, extensionName, extens
         });
     }
 
-    // Option Selection
-    optionsContainer.addEventListener('click', (e) => {
+    // Option Selection - shared handler for click and touch
+    const handleOptionSelect = (e) => {
         e.stopPropagation();
+        e.preventDefault();
         const option = e.target.closest('.bot-browser-multi-select-option');
         if (!option) return;
 
@@ -870,7 +1245,7 @@ function setupCustomDropdown(container, state, filterType, extensionName, extens
             }
 
             // Save and refresh
-            savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters);
+            savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters, state.jannyAdvancedFilters, state.ctAdvancedFilters, state.wyvernAdvancedFilters);
             refreshCardGrid(state, extensionName, extension_settings, showCardDetailFunc);
 
             // Keep dropdown open for multi-select
@@ -879,7 +1254,7 @@ function setupCustomDropdown(container, state, filterType, extensionName, extens
             state.filters.creator = value;
 
             // Save and refresh
-            savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters);
+            savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters, state.jannyAdvancedFilters, state.ctAdvancedFilters, state.wyvernAdvancedFilters);
             refreshCardGrid(state, extensionName, extension_settings, showCardDetailFunc);
 
             // Close dropdown for single select
@@ -968,16 +1343,131 @@ function setupCustomDropdown(container, state, filterType, extensionName, extens
                         console.error('[Bot Browser] JannyAI sort failed:', error);
                     }
                 })();
+            } else if (state.isCharacterTavern) {
+                // For Character Tavern, trigger fresh API call with new sort
+                console.log('[Bot Browser] Triggering Character Tavern sort:', state.sortBy);
+                (async () => {
+                    try {
+                        resetCharacterTavernState();
+
+                        const cards = await searchCharacterTavern({
+                            query: state.filters.search,
+                            page: 1,
+                            limit: 30,
+                            hasLorebook: state.ctAdvancedFilters?.hasLorebook || undefined,
+                            isOC: state.ctAdvancedFilters?.isOC || undefined,
+                            minTokens: state.ctAdvancedFilters?.minTokens || undefined,
+                            maxTokens: state.ctAdvancedFilters?.maxTokens || undefined,
+                            tags: state.ctAdvancedFilters?.tags || []
+                        });
+
+                        state.currentCards = cards;
+
+                        // For CT, search is done server-side by the API
+                        // Clear Fuse to prevent stale client-side search from overriding API results
+                        state.fuse = null;
+
+                        // Apply client-side filters (blocklist, NSFW) and sort
+                        const menuContent = document.querySelector('.bot-browser-content');
+                        const filteredCards = applyClientSideFilters(cards, state, extensionName, extension_settings);
+                        state.filteredCards = sortCards(filteredCards, state.sortBy);
+                        state.currentPage = 1; // Reset to page 1 on new sort
+
+                        updateCachedFiltersAndDropdowns(state, menuContent);
+                        renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+                    } catch (error) {
+                        console.error('[Bot Browser] Character Tavern sort failed:', error);
+                    }
+                })();
+            } else if (state.isWyvern) {
+                // For Wyvern, trigger fresh API call with new sort
+                console.log('[Bot Browser] Triggering Wyvern sort:', state.sortBy);
+                (async () => {
+                    try {
+                        if (state.isWyvernLorebooks) {
+                            resetWyvernLorebooksApiState();
+                        } else {
+                            resetWyvernApiState();
+                        }
+
+                        // Map sort options to Wyvern format
+                        let wyvernSort = 'votes';
+                        let wyvernOrder = 'DESC';
+                        switch (state.sortBy) {
+                            case 'date_desc': wyvernSort = 'created_at'; wyvernOrder = 'DESC'; break;
+                            case 'date_asc': wyvernSort = 'created_at'; wyvernOrder = 'ASC'; break;
+                            case 'name_asc': wyvernSort = 'name'; wyvernOrder = 'ASC'; break;
+                            case 'name_desc': wyvernSort = 'name'; wyvernOrder = 'DESC'; break;
+                            default: wyvernSort = 'votes'; wyvernOrder = 'DESC';
+                        }
+
+                        const searchFunc = state.isWyvernLorebooks ? searchWyvernLorebooks : searchWyvernCharacters;
+                        const transformFunc = state.isWyvernLorebooks ? transformWyvernLorebook : transformWyvernCard;
+
+                        const result = await searchFunc({
+                            search: state.filters.search,
+                            page: 1,
+                            limit: 40,
+                            sort: wyvernSort,
+                            order: wyvernOrder,
+                            tags: state.wyvernAdvancedFilters?.tags || [],
+                            rating: state.wyvernAdvancedFilters?.rating !== 'all' ? state.wyvernAdvancedFilters?.rating : undefined,
+                            hideNsfw: !state.wyvernAdvancedFilters?.rating ? extension_settings[extensionName].hideNsfw : false
+                        });
+
+                        const cards = result.results.map(transformFunc);
+                        state.currentCards = cards;
+
+                        // For Wyvern, search is done server-side by the API
+                        // Clear Fuse to prevent stale client-side search from overriding API results
+                        state.fuse = null;
+
+                        // Apply client-side filters (blocklist) and sort
+                        const menuContent = document.querySelector('.bot-browser-content');
+                        const filteredCards = applyClientSideFilters(cards, state, extensionName, extension_settings);
+                        state.filteredCards = sortCards(filteredCards, state.sortBy);
+                        state.currentPage = 1; // Reset to page 1 on new sort
+
+                        updateCachedFiltersAndDropdowns(state, menuContent);
+                        renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+                    } catch (error) {
+                        console.error('[Bot Browser] Wyvern sort failed:', error);
+                    }
+                })();
             } else {
                 // Standard refresh for non-Chub sources
                 refreshCardGrid(state, extensionName, extension_settings, showCardDetailFunc);
             }
 
             // Save and close dropdown
-            savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters, state.jannyAdvancedFilters);
+            savePersistentSearch(extensionName, extension_settings, state.currentService, state.filters, state.sortBy, state.advancedFilters, state.jannyAdvancedFilters, state.ctAdvancedFilters, state.wyvernAdvancedFilters);
             dropdown.classList.remove('open');
         }
-    });
+    };
+
+    // Add click handler
+    optionsContainer.addEventListener('click', handleOptionSelect);
+
+    // Touch handling - detect tap vs scroll
+    let touchStartY = 0;
+    let touchStartTime = 0;
+    const SCROLL_THRESHOLD = 10; // pixels of movement to consider it a scroll
+
+    optionsContainer.addEventListener('touchstart', (e) => {
+        touchStartY = e.touches[0].clientY;
+        touchStartTime = Date.now();
+    }, { passive: true });
+
+    optionsContainer.addEventListener('touchend', (e) => {
+        const touchEndY = e.changedTouches[0].clientY;
+        const touchDuration = Date.now() - touchStartTime;
+        const touchDistance = Math.abs(touchEndY - touchStartY);
+
+        // Only select if it was a tap (minimal movement, quick touch)
+        if (touchDistance < SCROLL_THRESHOLD && touchDuration < 500) {
+            handleOptionSelect(e);
+        }
+    }, { passive: false });
 }
 
 
@@ -997,21 +1487,29 @@ function renderPage(state, menuContent, showCardDetailFunc, extensionName, exten
     // Create HTML for page cards
     const cardsHTML = pageCards.map(card => createCardHTML(card)).join('');
 
-    // Create pagination HTML - for live APIs (Chub/JannyAI), don't show total pages
+    // Create pagination HTML - for live APIs (Chub/JannyAI/CT/Wyvern) and trending, don't show total pages
     const chubApiState = state.isLorebooks ? getChubLorebooksApiState() : getChubApiState();
-    const paginationHTML = state.isLiveChub
-        ? createChubPaginationHTML(
-            state.currentPage,
-            chubApiState.hasMore,
-            state.currentPage * cardsPerPage < state.filteredCards.length
-        )
-        : state.isJannyAI
-            ? createChubPaginationHTML(
-                jannyApiState.page,  // Use API page number for JannyAI
-                jannyApiState.hasMore,
-                false  // No client-side pagination for JannyAI
-            )
-        : createPaginationHTML(state.currentPage, state.totalPages);
+    const ctApiState = getCharacterTavernApiState();
+    const wyvernApiState = state.isWyvernLorebooks ? getWyvernLorebooksApiState() : getWyvernApiState();
+
+    let paginationHTML;
+    if (state.isJannyAITrending) {
+        paginationHTML = createChubPaginationHTML(jannyTrendingState.page, jannyTrendingState.hasMore, false);
+    } else if (state.isChubTrending) {
+        paginationHTML = createChubPaginationHTML(chubTrendingState.page, chubTrendingState.hasMore, false);
+    } else if (state.isWyvernTrending) {
+        paginationHTML = createChubPaginationHTML(wyvernTrendingState.page, wyvernTrendingState.hasMore, false);
+    } else if (state.isLiveChub) {
+        paginationHTML = createChubPaginationHTML(state.currentPage, chubApiState.hasMore, state.currentPage * cardsPerPage < state.filteredCards.length);
+    } else if (state.isJannyAI) {
+        paginationHTML = createChubPaginationHTML(jannyApiState.page, jannyApiState.hasMore, false);
+    } else if (state.isCharacterTavern) {
+        paginationHTML = createChubPaginationHTML(ctApiState.page, ctApiState.hasMore, false);
+    } else if (state.isWyvern) {
+        paginationHTML = createChubPaginationHTML(wyvernApiState.page, wyvernApiState.hasMore, false);
+    } else {
+        paginationHTML = createPaginationHTML(state.currentPage, state.totalPages);
+    }
 
     // Set grid content
     gridContainer.innerHTML = cardsHTML + paginationHTML;
@@ -1030,10 +1528,20 @@ function renderPage(state, menuContent, showCardDetailFunc, extensionName, exten
     });
 
     // Attach pagination listeners
-    if (state.isLiveChub) {
+    if (state.isJannyAITrending) {
+        setupJannyTrendingPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+    } else if (state.isChubTrending) {
+        setupChubTrendingPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+    } else if (state.isWyvernTrending) {
+        setupWyvernTrendingPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+    } else if (state.isLiveChub) {
         setupChubPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings);
     } else if (state.isJannyAI) {
         setupJannyPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+    } else if (state.isCharacterTavern) {
+        setupCTPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+    } else if (state.isWyvern) {
+        setupWyvernPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings);
     } else {
         setupPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings);
     }
@@ -1049,6 +1557,8 @@ function renderPage(state, menuContent, showCardDetailFunc, extensionName, exten
         console.log(`[Bot Browser] Rendered Chub page ${state.currentPage} (${pageCards.length} cards)`);
     } else if (state.isJannyAI) {
         console.log(`[Bot Browser] Rendered JannyAI API page ${jannyApiState.page} (${pageCards.length} cards)`);
+    } else if (state.isCharacterTavern) {
+        console.log(`[Bot Browser] Rendered Character Tavern API page ${ctApiState.page} (${pageCards.length} cards)`);
     } else {
         console.log(`[Bot Browser] Rendered page ${state.currentPage}/${state.totalPages}`);
     }
@@ -1218,6 +1728,293 @@ function setupJannyPaginationListeners(gridContainer, state, menuContent, showCa
     });
 }
 
+// Setup Character Tavern pagination - uses API pagination directly (1 API page = 1 UI page)
+function setupCTPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings) {
+    const pagination = gridContainer.querySelector('.bot-browser-pagination');
+    if (!pagination) return;
+
+    const ctApiState = getCharacterTavernApiState();
+
+    pagination.querySelectorAll('.bot-browser-pagination-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const action = btn.dataset.action;
+
+            // Helper to fetch and display an API page
+            const fetchApiPage = async (pageNum) => {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+
+                try {
+                    console.log(`[Bot Browser] Fetching Character Tavern API page ${pageNum}`);
+
+                    const cards = await searchCharacterTavern({
+                        query: state.filters.search,
+                        page: pageNum,
+                        limit: 30,
+                        hasLorebook: state.ctAdvancedFilters?.hasLorebook || undefined,
+                        isOC: state.ctAdvancedFilters?.isOC || undefined,
+                        minTokens: state.ctAdvancedFilters?.minTokens || undefined,
+                        maxTokens: state.ctAdvancedFilters?.maxTokens || undefined,
+                        tags: state.ctAdvancedFilters?.tags || []
+                    });
+
+                    // REPLACE cards (not accumulate)
+                    state.currentCards = cards;
+
+                    // For CT, search is done server-side by the API
+                    // Clear Fuse to prevent stale client-side search from overriding API results
+                    state.fuse = null;
+                    state.filteredCards = applyClientSideFilters(cards, state, extensionName, extension_settings);
+
+                    updateCachedFiltersAndDropdowns(state, menuContent);
+                    renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+
+                    console.log(`[Bot Browser] Displaying Character Tavern API page ${pageNum} (${cards.length} cards)`);
+                } catch (error) {
+                    console.error('[Bot Browser] Failed to fetch Character Tavern page:', error);
+                    toastr.error('Failed to load page');
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = action === 'next'
+                        ? 'Next <i class="fa-solid fa-angle-right"></i>'
+                        : '<i class="fa-solid fa-angle-left"></i> Previous';
+                }
+            };
+
+            if (action === 'prev' && ctApiState.page > 1) {
+                await fetchApiPage(ctApiState.page - 1);
+            } else if (action === 'next' && ctApiState.hasMore) {
+                await fetchApiPage(ctApiState.page + 1);
+            }
+        });
+    });
+}
+
+// Setup Wyvern pagination - uses API pagination directly (1 API page = 1 UI page)
+function setupWyvernPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings) {
+    const pagination = gridContainer.querySelector('.bot-browser-pagination');
+    if (!pagination) return;
+
+    const wyvernApiState = state.isWyvernLorebooks ? getWyvernLorebooksApiState() : getWyvernApiState();
+
+    pagination.querySelectorAll('.bot-browser-pagination-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const action = btn.dataset.action;
+
+            // Helper to fetch and display an API page
+            const fetchApiPage = async (pageNum) => {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+
+                try {
+                    console.log(`[Bot Browser] Fetching Wyvern API page ${pageNum}`);
+
+                    // Map sort options to Wyvern format
+                    let wyvernSort = 'votes';
+                    let wyvernOrder = 'DESC';
+                    switch (state.sortBy) {
+                        case 'date_desc': wyvernSort = 'created_at'; wyvernOrder = 'DESC'; break;
+                        case 'date_asc': wyvernSort = 'created_at'; wyvernOrder = 'ASC'; break;
+                        case 'name_asc': wyvernSort = 'name'; wyvernOrder = 'ASC'; break;
+                        case 'name_desc': wyvernSort = 'name'; wyvernOrder = 'DESC'; break;
+                        default: wyvernSort = 'votes'; wyvernOrder = 'DESC';
+                    }
+
+                    const searchFunc = state.isWyvernLorebooks ? searchWyvernLorebooks : searchWyvernCharacters;
+                    const transformFunc = state.isWyvernLorebooks ? transformWyvernLorebook : transformWyvernCard;
+
+                    const result = await searchFunc({
+                        search: state.filters.search,
+                        page: pageNum,
+                        limit: 40,
+                        sort: wyvernSort,
+                        order: wyvernOrder,
+                        tags: state.wyvernAdvancedFilters?.tags || [],
+                        rating: state.wyvernAdvancedFilters?.rating !== 'all' ? state.wyvernAdvancedFilters?.rating : undefined,
+                        hideNsfw: !state.wyvernAdvancedFilters?.rating ? extension_settings[extensionName].hideNsfw : false
+                    });
+
+                    const cards = result.results.map(transformFunc);
+
+                    // REPLACE cards (not accumulate)
+                    state.currentCards = cards;
+
+                    // For Wyvern, search is done server-side by the API
+                    // Clear Fuse to prevent stale client-side search from overriding API results
+                    state.fuse = null;
+                    state.filteredCards = applyClientSideFilters(cards, state, extensionName, extension_settings);
+
+                    updateCachedFiltersAndDropdowns(state, menuContent);
+                    renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+
+                    console.log(`[Bot Browser] Displaying Wyvern API page ${pageNum} (${cards.length} cards)`);
+                } catch (error) {
+                    console.error('[Bot Browser] Failed to fetch Wyvern page:', error);
+                    toastr.error('Failed to load page');
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = action === 'next'
+                        ? 'Next <i class="fa-solid fa-angle-right"></i>'
+                        : '<i class="fa-solid fa-angle-left"></i> Previous';
+                }
+            };
+
+            if (action === 'prev' && wyvernApiState.page > 1) {
+                await fetchApiPage(wyvernApiState.page - 1);
+            } else if (action === 'next' && wyvernApiState.hasMore) {
+                await fetchApiPage(wyvernApiState.page + 1);
+            }
+        });
+    });
+}
+
+// Setup Chub Trending pagination - uses API pagination
+function setupChubTrendingPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings) {
+    const pagination = gridContainer.querySelector('.bot-browser-pagination');
+    if (!pagination) return;
+
+    pagination.querySelectorAll('.bot-browser-pagination-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const action = btn.dataset.action;
+
+            const fetchApiPage = async (pageNum) => {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+
+                try {
+                    console.log(`[Bot Browser] Fetching Chub trending page ${pageNum}`);
+                    const result = await fetchChubTrending({
+                        page: pageNum,
+                        limit: 48,
+                        nsfw: !extension_settings[extensionName].hideNsfw
+                    });
+                    const cards = (result.nodes || []).map(transformChubTrendingCard);
+
+                    // Replace current cards with new page
+                    state.currentCards = cards;
+                    state.filteredCards = applyClientSideFilters(cards, state, extensionName, extension_settings);
+                    state.currentPage = 1;
+                    state.totalPages = 1;
+
+                    renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+                    console.log(`[Bot Browser] Displaying Chub trending page ${pageNum} (${cards.length} cards)`);
+                } catch (error) {
+                    console.error('[Bot Browser] Failed to fetch Chub trending page:', error);
+                    toastr.error('Failed to load page');
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = action === 'next'
+                        ? 'Next <i class="fa-solid fa-angle-right"></i>'
+                        : '<i class="fa-solid fa-angle-left"></i> Previous';
+                }
+            };
+
+            if (action === 'prev' && chubTrendingState.page > 1) {
+                await fetchApiPage(chubTrendingState.page - 1);
+            } else if (action === 'next' && chubTrendingState.hasMore) {
+                await fetchApiPage(chubTrendingState.page + 1);
+            }
+        });
+    });
+}
+
+// Setup JannyAI Trending pagination - uses API pagination
+function setupJannyTrendingPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings) {
+    const pagination = gridContainer.querySelector('.bot-browser-pagination');
+    if (!pagination) return;
+
+    pagination.querySelectorAll('.bot-browser-pagination-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const action = btn.dataset.action;
+
+            const fetchApiPage = async (pageNum) => {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+
+                try {
+                    console.log(`[Bot Browser] Fetching JanitorAI/JannyAI trending page ${pageNum}`);
+                    const result = await fetchJannyTrending({ page: pageNum, limit: 40 });
+                    const cards = (result.characters || []).map(transformJannyTrendingCard);
+
+                    // Replace current cards with new page
+                    state.currentCards = cards;
+                    state.filteredCards = applyClientSideFilters(cards, state, extensionName, extension_settings);
+                    state.currentPage = 1;
+                    state.totalPages = 1;
+
+                    renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+                    console.log(`[Bot Browser] Displaying JanitorAI/JannyAI trending page ${pageNum} (${cards.length} cards)`);
+                } catch (error) {
+                    console.error('[Bot Browser] Failed to fetch JannyAI trending page:', error);
+                    toastr.error('Failed to load page');
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = action === 'next'
+                        ? 'Next <i class="fa-solid fa-angle-right"></i>'
+                        : '<i class="fa-solid fa-angle-left"></i> Previous';
+                }
+            };
+
+            if (action === 'prev' && jannyTrendingState.page > 1) {
+                await fetchApiPage(jannyTrendingState.page - 1);
+            } else if (action === 'next' && jannyTrendingState.hasMore) {
+                await fetchApiPage(jannyTrendingState.page + 1);
+            }
+        });
+    });
+}
+
+// Setup Wyvern Trending pagination - uses API pagination
+function setupWyvernTrendingPaginationListeners(gridContainer, state, menuContent, showCardDetailFunc, extensionName, extension_settings) {
+    const pagination = gridContainer.querySelector('.bot-browser-pagination');
+    if (!pagination) return;
+
+    pagination.querySelectorAll('.bot-browser-pagination-btn').forEach(btn => {
+        btn.addEventListener('click', async () => {
+            const action = btn.dataset.action;
+
+            const fetchApiPage = async (pageNum) => {
+                btn.disabled = true;
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
+
+                try {
+                    console.log(`[Bot Browser] Fetching Wyvern trending page ${pageNum}`);
+                    const result = await fetchWyvernTrending({
+                        page: pageNum,
+                        limit: 40,
+                        sort: 'nsfw-popular',
+                        rating: extension_settings[extensionName].hideNsfw ? 'none' : 'all'
+                    });
+                    const cards = (result.results || []).map(transformWyvernTrendingCard);
+
+                    // Replace current cards with new page
+                    state.currentCards = cards;
+                    state.filteredCards = applyClientSideFilters(cards, state, extensionName, extension_settings);
+                    state.currentPage = 1;
+                    state.totalPages = 1;
+
+                    renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
+                    console.log(`[Bot Browser] Displaying Wyvern trending page ${pageNum} (${cards.length} cards)`);
+                } catch (error) {
+                    console.error('[Bot Browser] Failed to fetch Wyvern trending page:', error);
+                    toastr.error('Failed to load page');
+                } finally {
+                    btn.disabled = false;
+                    btn.innerHTML = action === 'next'
+                        ? 'Next <i class="fa-solid fa-angle-right"></i>'
+                        : '<i class="fa-solid fa-angle-left"></i> Previous';
+                }
+            };
+
+            if (action === 'prev' && wyvernTrendingState.page > 1) {
+                await fetchApiPage(wyvernTrendingState.page - 1);
+            } else if (action === 'next' && wyvernTrendingState.hasMore) {
+                await fetchApiPage(wyvernTrendingState.page + 1);
+            }
+        });
+    });
+}
+
 function createPaginationHTML(currentPage, totalPages) {
     if (totalPages <= 1) return '';
 
@@ -1316,11 +2113,15 @@ export function refreshCardGrid(state, extensionName, extension_settings, showCa
     if (countContainer) {
         const hideNsfw = extension_settings[extensionName].hideNsfw || false;
         const nsfwText = hideNsfw ? ' (after hiding NSFW)' : '';
-        // For live APIs (Chub/JannyAI), show different text (we don't know total)
+        // For live APIs (Chub/JannyAI/CT/Wyvern), show different text (we don't know total)
         if (state.isLiveChub) {
             countContainer.textContent = `Browsing Chub API${nsfwText}`;
         } else if (state.isJannyAI) {
             countContainer.textContent = `Browsing JannyAI${nsfwText}`;
+        } else if (state.isCharacterTavern) {
+            countContainer.textContent = `Browsing Character Tavern${nsfwText}`;
+        } else if (state.isWyvern) {
+            countContainer.textContent = `Browsing Wyvern Chat${nsfwText}`;
         } else {
             countContainer.textContent = `${cardsWithImages.length} card${cardsWithImages.length !== 1 ? 's' : ''} found${nsfwText}`;
         }

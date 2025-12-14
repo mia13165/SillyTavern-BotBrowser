@@ -4,10 +4,33 @@ import { buildDetailModalHTML } from '../templates/detailModal.js';
 import { prepareCardDataForModal } from '../data/cardPreparation.js';
 import { getChubCharacter, transformFullChubCharacter, getChubLorebook } from '../services/chubApi.js';
 import { fetchJannyCharacterDetails, transformFullJannyCharacter } from '../services/jannyApi.js';
+import { characters, selectCharacterById } from '../../../../../../script.js';
 
 let isOpeningModal = false;
 
-export async function showCardDetail(card, extensionName, extension_settings, state, save=true) {
+/**
+ * Find a character in SillyTavern's characters array by name
+ * @param {string} name - Character name to search for
+ * @returns {{index: number, character: object}|null} - Character index and data, or null if not found
+ */
+function findCharacterByName(name) {
+    if (!name || !characters || !Array.isArray(characters)) {
+        return null;
+    }
+
+    const normalizedName = name.toLowerCase().trim();
+
+    for (let i = 0; i < characters.length; i++) {
+        const char = characters[i];
+        if (char && char.name && char.name.toLowerCase().trim() === normalizedName) {
+            return { index: i, character: char };
+        }
+    }
+
+    return null;
+}
+
+export async function showCardDetail(card, extensionName, extension_settings, state, save=true, isRandom=false) {
     if (isOpeningModal) {
         console.log('[Bot Browser] Modal already opening, ignoring duplicate click');
         return;
@@ -30,7 +53,7 @@ export async function showCardDetail(card, extensionName, extension_settings, st
             state.recentlyViewed = addToRecentlyViewed(extensionName, extension_settings, state.recentlyViewed, fullCard);
         }
 
-        const { detailOverlay, detailModal } = createDetailModal(fullCard);
+        const { detailOverlay, detailModal } = createDetailModal(fullCard, isRandom);
 
         document.body.appendChild(detailOverlay);
         document.body.appendChild(detailModal);
@@ -149,7 +172,7 @@ async function loadFullCard(card) {
     return fullCard;
 }
 
-function createDetailModal(fullCard) {
+function createDetailModal(fullCard, isRandom = false) {
     const detailOverlay = document.createElement('div');
     detailOverlay.id = 'bot-browser-detail-overlay';
     detailOverlay.className = 'bot-browser-detail-overlay';
@@ -162,6 +185,18 @@ function createDetailModal(fullCard) {
 
     const cardData = prepareCardDataForModal(fullCard, isLorebook);
     const cardIsBookmarked = isBookmarked(fullCard.id);
+
+    // Check if this is an imported card from "My Imports"
+    const isImported = fullCard.service === 'my_imports' || fullCard.isLocal === true;
+
+    // Check if this character exists in SillyTavern
+    const stCharacter = findCharacterByName(fullCard.name);
+    const characterExistsInST = stCharacter !== null;
+
+    // Store character index for later use
+    if (characterExistsInST) {
+        detailModal.dataset.stCharacterIndex = stCharacter.index;
+    }
 
     detailModal.innerHTML = buildDetailModalHTML(
         cardData.cardName,
@@ -181,7 +216,10 @@ function createDetailModal(fullCard) {
         cardData.processedEntries,
         cardData.entriesCount,
         cardData.metadata,
-        cardIsBookmarked
+        cardIsBookmarked,
+        isRandom,
+        isImported,
+        characterExistsInST
     );
 
     return { detailOverlay, detailModal };
@@ -274,6 +312,60 @@ function setupDetailModalEvents(detailModal, detailOverlay, fullCard, state) {
                 bookmarkBtn.querySelector('i').className = 'fa-solid fa-bookmark';
                 bookmarkBtn.querySelector('span').textContent = 'Bookmarked';
                 toastr.success('Added to bookmarks', '', { timeOut: 2000 });
+            }
+        });
+    }
+
+    // Open in SillyTavern button - opens chat with character and closes BotBrowser
+    const openInSTBtn = detailModal.querySelector('.bot-browser-open-in-st-btn');
+    if (openInSTBtn) {
+        openInSTBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+
+            const characterIndex = detailModal.dataset.stCharacterIndex;
+            if (characterIndex !== undefined) {
+                try {
+                    // Disconnect any mutation observers on the menu
+                    const menu = document.getElementById('bot-browser-menu');
+                    if (menu && menu.dialogObserver) {
+                        menu.dialogObserver.disconnect();
+                    }
+
+                    // Remove ALL BotBrowser elements to ensure nothing blocks clicks
+                    const elementsToRemove = [
+                        'bot-browser-detail-modal',
+                        'bot-browser-detail-overlay',
+                        'bot-browser-menu',
+                        'bot-browser-overlay',
+                        'bot-browser-settings-modal',
+                        'bot-browser-settings-overlay',
+                        'bot-browser-image-lightbox'
+                    ];
+
+                    elementsToRemove.forEach(id => {
+                        const el = document.getElementById(id);
+                        if (el) el.remove();
+                    });
+
+                    // Also remove any elements by class that might be blocking
+                    document.querySelectorAll('.bot-browser-detail-overlay, .bb-settings-backdrop').forEach(el => el.remove());
+
+                    // Reset body pointer events (BotBrowser sets this to 'none' when open)
+                    document.body.style.pointerEvents = '';
+
+                    // Reset the modal opening guard
+                    isOpeningModal = false;
+
+                    // Select the character in SillyTavern
+                    await selectCharacterById(parseInt(characterIndex, 10));
+                    console.log('[Bot Browser] Opened chat with character:', fullCard.name);
+                } catch (error) {
+                    console.error('[Bot Browser] Failed to open character:', error);
+                    toastr.error('Failed to open character chat', 'Error');
+                    // Still reset pointer events on error
+                    document.body.style.pointerEvents = '';
+                }
             }
         });
     }

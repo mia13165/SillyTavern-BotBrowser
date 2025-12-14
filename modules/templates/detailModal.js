@@ -1,7 +1,27 @@
 import { sanitizeImageUrl } from '../utils/utils.js';
 
-export function buildDetailModalHTML(cardName, imageUrl, isLorebook, cardCreator, tags, creator, websiteDesc, description, descPreview, personality, scenario, firstMessage, alternateGreetings, exampleMsg, entries, entriesCount, metadata, isBookmarked = false) {
+export function buildDetailModalHTML(cardName, imageUrl, isLorebook, cardCreator, tags, creator, websiteDesc, description, descPreview, personality, scenario, firstMessage, alternateGreetings, exampleMsg, entries, entriesCount, metadata, isBookmarked = false, isRandom = false, isImported = false, characterExistsInST = false) {
     const safeImageUrl = sanitizeImageUrl(imageUrl);
+
+    // Random buttons HTML (only shown when viewing a random card)
+    const randomButtonsHTML = isRandom ? `
+                <div class="bot-browser-detail-actions-row bot-browser-random-row">
+                    <button class="bot-browser-random-same-btn" title="Get another random card from the same source">
+                        <i class="fa-solid fa-shuffle"></i> <span>Same Source</span>
+                    </button>
+                    <button class="bot-browser-random-any-btn" title="Get a random card from any source">
+                        <i class="fa-solid fa-dice"></i> <span>Any Source</span>
+                    </button>
+                </div>` : '';
+
+    // Open in SillyTavern button (only for imported cards that exist in ST)
+    const openInSTButtonHTML = (isImported && characterExistsInST) ? `
+                <div class="bot-browser-detail-actions-row bot-browser-open-st-row">
+                    <button class="bot-browser-open-in-st-btn" title="Open a chat with this character in SillyTavern">
+                        <i class="fa-solid fa-comments"></i> <span>Open Chat in SillyTavern</span>
+                    </button>
+                </div>` : '';
+
     return `
         <div class="bot-browser-detail-header">
             <h2>${cardName}</h2>
@@ -12,17 +32,21 @@ export function buildDetailModalHTML(cardName, imageUrl, isLorebook, cardCreator
 
         <div class="bot-browser-detail-content">
             <div class="bot-browser-detail-scroll-container">
-                <div class="bot-browser-detail-actions">
-                    <button class="bot-browser-import-button">
-                        <i class="fa-solid fa-download"></i> Import to SillyTavern
-                    </button>
-                    <button class="bot-browser-bookmark-btn ${isBookmarked ? 'bookmarked' : ''}">
-                        <i class="fa-${isBookmarked ? 'solid' : 'regular'} fa-bookmark"></i>
-                        <span>${isBookmarked ? 'Bookmarked' : 'Bookmark'}</span>
-                    </button>
-                    <button class="bot-browser-detail-back">
-                        <i class="fa-solid fa-arrow-left"></i> Back to Results
-                    </button>
+                <div class="bot-browser-detail-actions-container">
+                    <div class="bot-browser-detail-actions-row">
+                        <button class="bot-browser-import-button">
+                            <i class="fa-solid fa-download"></i> <span>Import</span>
+                        </button>
+                        <button class="bot-browser-bookmark-btn ${isBookmarked ? 'bookmarked' : ''}">
+                            <i class="fa-${isBookmarked ? 'solid' : 'regular'} fa-bookmark"></i>
+                            <span>${isBookmarked ? 'Saved' : 'Save'}</span>
+                        </button>
+                        <button class="bot-browser-detail-back">
+                            <i class="fa-solid fa-arrow-left"></i> <span>Back</span>
+                        </button>
+                    </div>
+                    ${randomButtonsHTML}
+                    ${openInSTButtonHTML}
                 </div>
 
                 <div class="bot-browser-detail-image ${safeImageUrl ? 'clickable-image' : ''}" style="background-image: url('${safeImageUrl}');" ${safeImageUrl ? `data-image-url="${safeImageUrl}" title="Click to enlarge"` : ''}>

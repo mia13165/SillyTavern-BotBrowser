@@ -1,8 +1,12 @@
 // Statistics tracking for Bot Browser extension
-import { saveImportStats } from './storage.js';
+import { saveImportStats, trackImportedCard } from './storage.js';
 
 // Track an import
 export function trackImport(extensionName, extension_settings, importStats, card, type) {
+    // Always track the full card data for "My Imports" browsing
+    trackImportedCard(card, type);
+
+    // Only track stats if enabled
     if (!extension_settings[extensionName].trackStats) return importStats;
 
     const importRecord = {

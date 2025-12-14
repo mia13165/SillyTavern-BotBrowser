@@ -1,5 +1,13 @@
 import { default_avatar } from '../../../../../../script.js';
 import { loadQuillgenIndex } from './quillgenApi.js';
+import { searchCharacterTavern, characterTavernApiState, resetCharacterTavernState } from './characterTavernApi.js';
+import { loadMlpchagLive, clearMlpchagCache, getMlpchagApiState, resetMlpchagState } from './mlpchagApi.js';
+import {
+    loadWyvernCharacters, loadMoreWyvernCharacters, searchWyvernCharacters, transformWyvernCard,
+    loadWyvernLorebooks, loadMoreWyvernLorebooks, searchWyvernLorebooks, transformWyvernLorebook,
+    wyvernApiState, wyvernLorebooksApiState, resetWyvernApiState, resetWyvernLorebooksApiState,
+    getWyvernApiState, getWyvernLorebooksApiState
+} from './wyvernApi.js';
 
 const baseUrl = 'https://raw.githubusercontent.com/mia13165/updated_cards/refs/heads/main';
 
@@ -154,6 +162,48 @@ export function resetChubLorebooksApiState() {
     chubLorebooksApiState.currentSort = 'star_count';
 }
 
+// Export Character Tavern API state helpers
+export function getCharacterTavernApiState() {
+    return characterTavernApiState;
+}
+
+export { resetCharacterTavernState };
+
+/**
+ * Load more Character Tavern cards (for pagination)
+ */
+export async function loadMoreCharacterTavernCards(options = {}) {
+    if (characterTavernApiState.isLoading || !characterTavernApiState.hasMore) {
+        return [];
+    }
+
+    try {
+        console.log(`[Bot Browser] Loading Character Tavern page ${characterTavernApiState.page + 1}`);
+
+        const cards = await searchCharacterTavern({
+            query: options.search || '',
+            page: characterTavernApiState.page + 1,
+            limit: 30,
+            hasLorebook: options.hasLorebook,
+            isOC: options.isOC,
+            minTokens: options.minTokens,
+            maxTokens: options.maxTokens,
+            tags: options.tags || []
+        });
+
+        // Append to cache
+        if (!loadedData.serviceIndexes['character_tavern_live']) {
+            loadedData.serviceIndexes['character_tavern_live'] = [];
+        }
+        loadedData.serviceIndexes['character_tavern_live'].push(...cards);
+
+        return cards;
+    } catch (error) {
+        console.error('[Bot Browser] Failed to load more Character Tavern cards:', error);
+        return [];
+    }
+}
+
 /**
  * Load more Chub lorebooks (for infinite scroll)
  */
@@ -277,6 +327,94 @@ export async function loadServiceIndex(serviceName, useLiveApi = false, options 
             console.error('[Bot Browser] Chub API failed:', error);
             console.error('[Bot Browser] Error stack:', error.stack);
             // Fall through to archive method below
+        }
+    }
+
+    // For character_tavern with live API enabled, fetch from Character Tavern API
+    if (serviceName === 'character_tavern' && useLiveApi) {
+        resetCharacterTavernState();
+        delete loadedData.serviceIndexes['character_tavern_live'];
+
+        try {
+            console.log('[Bot Browser] Loading Character Tavern via live API');
+            const cards = await searchCharacterTavern({
+                query: options.search || '',
+                page: 1,
+                limit: 30,
+                hasLorebook: options.hasLorebook,
+                isOC: options.isOC,
+                minTokens: options.minTokens,
+                maxTokens: options.maxTokens,
+                tags: options.tags || []
+            });
+            loadedData.serviceIndexes['character_tavern_live'] = cards;
+            return cards;
+        } catch (error) {
+            console.error('[Bot Browser] Character Tavern API failed:', error);
+            // Fall through to archive method below
+        }
+    }
+
+    // For mlpchag with live API enabled, fetch from MLPChag API
+    if (serviceName === 'mlpchag' && useLiveApi) {
+        resetMlpchagState();
+        delete loadedData.serviceIndexes['mlpchag_live'];
+
+        try {
+            console.log('[Bot Browser] Loading MLPChag via live API');
+            const cards = await loadMlpchagLive();
+            loadedData.serviceIndexes['mlpchag_live'] = cards;
+            return cards;
+        } catch (error) {
+            console.error('[Bot Browser] MLPChag API failed:', error);
+            // Fall through to archive method below
+        }
+    }
+
+    // For wyvern with live API enabled, fetch from Wyvern Chat API
+    if (serviceName === 'wyvern' && useLiveApi) {
+        resetWyvernApiState();
+        delete loadedData.serviceIndexes['wyvern_live'];
+
+        try {
+            console.log('[Bot Browser] Loading Wyvern via live API');
+            const cards = await loadWyvernCharacters({
+                sort: options.sort || 'votes',
+                order: options.order || 'DESC',
+                search: options.search || '',
+                tags: options.tags || [],
+                rating: options.rating,
+                hideNsfw: options.hideNsfw || false
+            });
+            loadedData.serviceIndexes['wyvern_live'] = cards;
+            return cards;
+        } catch (error) {
+            console.error('[Bot Browser] Wyvern API failed:', error);
+            // Fall through to return empty (no archive for Wyvern)
+            return [];
+        }
+    }
+
+    // For wyvern_lorebooks with live API enabled, fetch from Wyvern Chat API
+    if (serviceName === 'wyvern_lorebooks' && useLiveApi) {
+        resetWyvernLorebooksApiState();
+        delete loadedData.serviceIndexes['wyvern_lorebooks_live'];
+
+        try {
+            console.log('[Bot Browser] Loading Wyvern Lorebooks via live API');
+            const lorebooks = await loadWyvernLorebooks({
+                sort: options.sort || 'created_at',
+                order: options.order || 'DESC',
+                search: options.search || '',
+                tags: options.tags || [],
+                rating: options.rating,
+                hideNsfw: options.hideNsfw || false
+            });
+            loadedData.serviceIndexes['wyvern_lorebooks_live'] = lorebooks;
+            return lorebooks;
+        } catch (error) {
+            console.error('[Bot Browser] Wyvern Lorebooks API failed:', error);
+            return [];
         }
     }
 
@@ -464,4 +602,73 @@ export function getServiceIndex(serviceName) {
 export function getLoadedChunk(service, chunkFile) {
     const chunkKey = `${service}/${chunkFile}`;
     return loadedData.loadedChunks[chunkKey];
+}
+
+// Re-export MLPChag API helpers
+export { clearMlpchagCache, getMlpchagApiState, resetMlpchagState };
+
+// Re-export Wyvern API helpers
+export { getWyvernApiState, getWyvernLorebooksApiState, resetWyvernApiState, resetWyvernLorebooksApiState };
+
+/**
+ * Load more Wyvern cards (for pagination)
+ */
+export async function loadMoreWyvernCards(options = {}) {
+    if (wyvernApiState.isLoading || !wyvernApiState.hasMore) {
+        return [];
+    }
+
+    try {
+        console.log(`[Bot Browser] Loading Wyvern page ${wyvernApiState.page + 1}`);
+
+        const cards = await loadMoreWyvernCharacters({
+            sort: options.sort || wyvernApiState.lastSort,
+            order: options.order || wyvernApiState.lastOrder,
+            search: options.search ?? wyvernApiState.lastSearch,
+            tags: options.tags || [],
+            hideNsfw: options.hideNsfw || false
+        });
+
+        // Append to cache
+        if (!loadedData.serviceIndexes['wyvern_live']) {
+            loadedData.serviceIndexes['wyvern_live'] = [];
+        }
+        loadedData.serviceIndexes['wyvern_live'].push(...cards);
+
+        return cards;
+    } catch (error) {
+        console.error('[Bot Browser] Failed to load more Wyvern cards:', error);
+        return [];
+    }
+}
+
+/**
+ * Load more Wyvern lorebooks (for pagination)
+ */
+export async function loadMoreWyvernLorebooksWrapper(options = {}) {
+    if (wyvernLorebooksApiState.isLoading || !wyvernLorebooksApiState.hasMore) {
+        return [];
+    }
+
+    try {
+        console.log(`[Bot Browser] Loading Wyvern Lorebooks page ${wyvernLorebooksApiState.page + 1}`);
+
+        const lorebooks = await loadMoreWyvernLorebooks({
+            sort: options.sort || wyvernLorebooksApiState.lastSort,
+            order: options.order || wyvernLorebooksApiState.lastOrder,
+            search: options.search ?? wyvernLorebooksApiState.lastSearch,
+            hideNsfw: options.hideNsfw || false
+        });
+
+        // Append to cache
+        if (!loadedData.serviceIndexes['wyvern_lorebooks_live']) {
+            loadedData.serviceIndexes['wyvern_lorebooks_live'] = [];
+        }
+        loadedData.serviceIndexes['wyvern_lorebooks_live'].push(...lorebooks);
+
+        return lorebooks;
+    } catch (error) {
+        console.error('[Bot Browser] Failed to load more Wyvern lorebooks:', error);
+        return [];
+    }
 }
