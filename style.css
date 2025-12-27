@@ -3628,6 +3628,104 @@ body #bot-browser-settings-modal,
     border-color: rgba(255, 80, 80, 0.5);
 }
 
+/* Random services list (bb-settings modal) */
+.bb-random-service-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    margin-top: 12px;
+}
+
+.bb-random-service-item {
+    appearance: none;
+    -webkit-appearance: none;
+    width: 100%;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    border-radius: 12px;
+    color: rgba(255, 255, 255, 0.9);
+    cursor: pointer;
+    text-align: left;
+    transition: all 0.2s ease;
+    user-select: none;
+}
+
+.bb-random-service-item:hover {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(255, 255, 255, 0.2);
+}
+
+.bb-random-service-item:active {
+    transform: translateY(1px);
+}
+
+.bb-random-service-item:focus-visible {
+    outline: none;
+    border-color: rgba(100, 150, 255, 0.6);
+    box-shadow: 0 0 0 3px rgba(100, 150, 255, 0.18);
+}
+
+.bb-random-service-item.enabled {
+    background: linear-gradient(135deg, rgba(100, 150, 255, 0.22), rgba(150, 100, 255, 0.22));
+    border-color: rgba(100, 150, 255, 0.35);
+    box-shadow: 0 6px 18px rgba(100, 150, 255, 0.12);
+}
+
+.bb-random-service-item.enabled:hover {
+    background: linear-gradient(135deg, rgba(100, 150, 255, 0.3), rgba(150, 100, 255, 0.3));
+    border-color: rgba(100, 150, 255, 0.5);
+}
+
+.bb-random-service-icon {
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background-color: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.12);
+    background-position: center;
+    background-repeat: no-repeat;
+    background-size: cover;
+    flex-shrink: 0;
+}
+
+.bb-random-service-name {
+    flex: 1;
+    font-weight: 500;
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.bb-random-service-check {
+    width: 24px;
+    height: 24px;
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(0, 0, 0, 0.25);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    flex-shrink: 0;
+}
+
+.bb-random-service-check i {
+    color: rgba(255, 255, 255, 0.55);
+    opacity: 0.35;
+    transition: opacity 0.2s ease, color 0.2s ease;
+}
+
+.bb-random-service-item.enabled .bb-random-service-check {
+    background: rgba(100, 150, 255, 0.18);
+    border-color: rgba(100, 150, 255, 0.35);
+}
+
+.bb-random-service-item.enabled .bb-random-service-check i {
+    color: rgba(100, 200, 255, 1);
+    opacity: 1;
+}
+
 .bb-api-options {
     display: grid;
     grid-template-columns: 1fr 1fr;

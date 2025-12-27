@@ -43,6 +43,85 @@ const state = {
     lastActiveTab: 'bots'
 };
 
+// Random service options (used for roulette + settings)
+const randomServiceOptions = [
+    {
+        id: 'risuai_realm',
+        name: 'Risuai Realm',
+        iconUrl: 'https://files.catbox.moe/216rab.webp',
+        iconSize: 'cover',
+    },
+    {
+        id: 'webring',
+        name: 'Webring',
+        iconUrl: 'https://files.catbox.moe/6avrsl.png',
+        iconSize: '85%',
+    },
+    {
+        id: 'nyai_me',
+        name: 'Nyai.me',
+        iconUrl: 'https://nyai.me/img/necologofavicon-64.png',
+        iconSize: '85%',
+    },
+    {
+        id: 'chub',
+        name: 'Chub',
+        iconUrl: 'https://avatars.charhub.io/icons/assets/full_logo.png',
+        iconSize: 'cover',
+        iconBg: '#ffffff',
+    },
+    {
+        id: 'character_tavern',
+        name: 'Character Tavern',
+        iconUrl: 'https://character-tavern.com/_app/immutable/assets/logo.DGIlOnDO.png',
+        iconSize: 'cover',
+    },
+    {
+        id: 'wyvern',
+        name: 'Wyvern Chat',
+        iconUrl: 'https://substackcdn.com/image/fetch/w_176,h_176,c_fill,f_webp,q_auto:good,fl_progressive:steep,g_auto/https%3A%2F%2Fsubstack-post-media.s3.amazonaws.com%2Fpublic%2Fimages%2F6ea09a00-0248-4482-a893-1a2d1e3fe3c1_512x512.png',
+        iconSize: 'cover',
+    },
+    {
+        id: 'catbox',
+        name: 'Catbox',
+        iconUrl: 'https://catbox.tech/favicon128.png',
+        iconSize: 'cover',
+    },
+    {
+        id: 'anchorhold',
+        name: '4chan - /aicg/',
+        iconUrl: 'https://assets.coingecko.com/coins/images/30124/large/4CHAN.png?1696529046',
+        iconSize: '85%',
+    },
+    {
+        id: 'mlpchag',
+        name: 'MLPchag',
+        iconUrl: 'https://derpicdn.net/img/view/2015/9/26/988523__safe_solo_upvotes+galore_smiling_cute_derpy+hooves_looking+at+you_looking+up_part+of+a_set_derpibooru+exclusive.png',
+        iconSize: 'cover',
+    },
+    {
+        id: 'desuarchive',
+        name: 'Desuarchive',
+        iconUrl: 'https://s2.vndb.org/ch/32/17032.jpg',
+        iconSize: 'cover',
+    },
+    {
+        id: 'jannyai',
+        name: 'JannyAI',
+        iconUrl: 'https://tse3.mm.bing.net/th/id/OIP.nb-qi0od9W6zRsskVwL6QAHaHa?rs=1&pid=ImgDetMain&o=7&rm=3',
+        iconSize: 'cover',
+    },
+];
+
+function getDefaultRandomServiceSettings() {
+    const enabledMap = {};
+    for (const service of randomServiceOptions) {
+        enabledMap[service.id] = true;
+    }
+    return enabledMap;
+}
+
 // Default settings
 const defaultSettings = {
     enabled: true,
@@ -63,7 +142,8 @@ const defaultSettings = {
     useCharacterTavernLiveApi: true,
     useMlpchagLiveApi: true,
     useWyvernLiveApi: true,
-    autoClearFilters: true
+    autoClearFilters: true,
+    randomServices: getDefaultRandomServiceSettings(),
 };
 
 // Stats storage
@@ -85,6 +165,18 @@ function loadSettings() {
     for (const key of Object.keys(defaultSettings)) {
         if (extension_settings[extensionName][key] === undefined) {
             extension_settings[extensionName][key] = defaultSettings[key];
+        }
+    }
+
+    // Ensure random service settings include all known services (for upgrades)
+    const randomServices = extension_settings[extensionName].randomServices;
+    if (typeof randomServices !== 'object' || randomServices === null) {
+        extension_settings[extensionName].randomServices = getDefaultRandomServiceSettings();
+    } else {
+        for (const service of randomServiceOptions) {
+            if (randomServices[service.id] === undefined) {
+                randomServices[service.id] = true;
+            }
         }
     }
 }
@@ -990,9 +1082,20 @@ function setupBottomButtons(menu) {
 // Store current random service for "same source" random button
 let currentRandomService = null;
 
+function getEnabledRandomServiceIds() {
+    const configured = extension_settings[extensionName]?.randomServices || {};
+    return randomServiceOptions
+        .map(s => s.id)
+        .filter(id => configured[id] !== false);
+}
+
 // Play service roulette - instant random selection (no animation)
 async function playServiceRoulette(menu, preferSameService = null) {
-    const serviceNames = ['risuai_realm', 'webring', 'nyai_me', 'chub', 'character_tavern', 'wyvern', 'catbox', 'anchorhold', 'mlpchag', 'desuarchive', 'jannyai'];
+    const serviceNames = getEnabledRandomServiceIds();
+    if (serviceNames.length === 0) {
+        toastr.warning('No random sources enabled. Enable at least one in Settings > Random.');
+        return;
+    }
 
     // Disable the random button during loading
     const randomButtons = menu.querySelectorAll('.bot-browser-random');
@@ -1086,6 +1189,9 @@ function showSettingsModal() {
                     </button>
                     <button class="bb-settings-tab" data-tab="search">
                         <i class="fa-solid fa-magnifying-glass"></i> <span>Search</span>
+                    </button>
+                    <button class="bb-settings-tab" data-tab="random">
+                        <i class="fa-solid fa-cube"></i> <span>Random</span>
                     </button>
                     <button class="bb-settings-tab" data-tab="api">
                         <i class="fa-solid fa-cloud"></i> <span>API</span>
@@ -1201,6 +1307,32 @@ function showSettingsModal() {
                         <small style="color: rgba(255,255,255,0.5); display: block; margin-top: 5px;">
                             Clears the "My Imports" list (doesn't delete actual characters)
                         </small>
+                    </div>
+
+                    <!-- RANDOM TAB -->
+                    <div class="bb-settings-tab-content" data-content="random">
+                        <div class="bb-setting-group">
+                            <label><i class="fa-solid fa-cube"></i> Allowed Random Sources</label>
+                            <small>Choose which services can be used when fetching a random card.</small>
+                            <div class="bb-random-service-list" id="bb-random-service-list">
+                                ${randomServiceOptions.map(service => {
+                                    const enabled = settings.randomServices?.[service.id] !== false;
+                                    const iconBg = service.iconBg ? `background-color: ${service.iconBg};` : '';
+                                    const iconSize = service.iconSize ? `background-size: ${service.iconSize};` : '';
+                                    return `
+                                        <button type="button"
+                                                class="bb-random-service-item${enabled ? ' enabled' : ''}"
+                                                data-service="${service.id}"
+                                                aria-pressed="${enabled ? 'true' : 'false'}">
+                                            <span class="bb-random-service-icon"
+                                                  style="background-image: url('${service.iconUrl}'); ${iconBg} ${iconSize}"></span>
+                                            <span class="bb-random-service-name">${escapeHTML(service.name)}</span>
+                                            <span class="bb-random-service-check"><i class="fa-solid fa-check"></i></span>
+                                        </button>
+                                    `;
+                                }).join('')}
+                            </div>
+                        </div>
                     </div>
 
                     <!-- API TAB -->
@@ -1340,6 +1472,15 @@ function showSettingsModal() {
     // Prevent panel clicks from closing
     panel.addEventListener('click', (e) => e.stopPropagation());
 
+    // Random services toggle list
+    panel.querySelectorAll('.bb-random-service-item').forEach((item) => {
+        item.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const enabled = item.classList.toggle('enabled');
+            item.setAttribute('aria-pressed', enabled ? 'true' : 'false');
+        });
+    });
+
     // Range sliders
     document.getElementById('bb-setting-max-recent').addEventListener('input', (e) => {
         document.getElementById('bb-max-recent-value').textContent = e.target.value;
@@ -1397,6 +1538,15 @@ function showSettingsModal() {
         settings.useCharacterTavernLiveApi = document.getElementById('bb-setting-ct-live-api').checked;
         settings.useMlpchagLiveApi = document.getElementById('bb-setting-mlpchag-live-api').checked;
         settings.useWyvernLiveApi = document.getElementById('bb-setting-wyvern-live-api').checked;
+
+        // Random services
+        const randomServices = {};
+        panel.querySelectorAll('.bb-random-service-item').forEach((item) => {
+            const serviceId = item.dataset.service;
+            if (!serviceId) return;
+            randomServices[serviceId] = item.classList.contains('enabled');
+        });
+        settings.randomServices = randomServices;
 
         // QuillGen settings
         const oldApiKey = settings.quillgenApiKey;
