@@ -476,7 +476,9 @@ async function showCardDetailWrapper(card, save = true, isRandom = false) {
 
             closeDetailModal();
 
-            if (!state.filters.tags.includes(tag)) {
+            // Case-insensitive check
+            const tagLower = tag.toLowerCase();
+            if (!state.filters.tags.some(t => t.toLowerCase() === tagLower)) {
                 state.filters.tags.push(tag);
             }
 

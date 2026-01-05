@@ -368,8 +368,9 @@ function updateFilterDropdowns(menuContent, allTags, allCreators, state) {
 
     // Add tag options (use DocumentFragment for better performance)
     const tagFragment = document.createDocumentFragment();
+    const normalizedFilterTags = state.filters.tags.map(t => t.toLowerCase());
     allTags.forEach(tag => {
-        const isSelected = state.filters.tags.includes(tag);
+        const isSelected = normalizedFilterTags.includes(tag.toLowerCase());
         const option = document.createElement('div');
         option.className = `bot-browser-multi-select-option ${isSelected ? 'selected' : ''}`;
         option.dataset.value = tag;
@@ -460,8 +461,9 @@ function updateFilterDropdowns(menuContent, allTags, allCreators, state) {
         });
     }
 
-    // Filter out tags that don't exist in the current service (cleanup)
-    const validTags = state.filters.tags.filter(tag => allTags.includes(tag));
+    // Filter out tags that don't exist in the current service (cleanup) - case-insensitive
+    const normalizedAllTags = allTags.map(t => t.toLowerCase());
+    const validTags = state.filters.tags.filter(tag => normalizedAllTags.includes(tag.toLowerCase()));
     if (validTags.length !== state.filters.tags.length) {
         state.filters.tags = validTags;
         // Re-run update to fix UI if tags were removed
@@ -1405,9 +1407,11 @@ function setupCustomDropdown(container, state, filterType, extensionName, extens
                 // Clear all tags
                 state.filters.tags = [];
             } else {
-                // Toggle tag selection
-                if (state.filters.tags.includes(value)) {
-                    state.filters.tags = state.filters.tags.filter(t => t !== value);
+                // Toggle tag selection (case-insensitive)
+                const valueLower = value.toLowerCase();
+                const existingIndex = state.filters.tags.findIndex(t => t.toLowerCase() === valueLower);
+                if (existingIndex !== -1) {
+                    state.filters.tags.splice(existingIndex, 1);
                 } else {
                     state.filters.tags.push(value);
                 }
@@ -2576,13 +2580,14 @@ function updateFilterUI(menuContent, state) {
             }
         }
 
-        // Update selected state on options
+        // Update selected state on options (case-insensitive)
         const tagOptions = tagFilterContainer.querySelectorAll('.bot-browser-multi-select-option');
+        const normalizedFilterTagsUI = state.filters.tags.map(t => t.toLowerCase());
         tagOptions.forEach(option => {
             const value = option.dataset.value;
             if (value === '' && state.filters.tags.length === 0) {
                 option.classList.add('selected');
-            } else if (state.filters.tags.includes(value)) {
+            } else if (normalizedFilterTagsUI.includes(value.toLowerCase())) {
                 option.classList.add('selected');
             } else {
                 option.classList.remove('selected');

@@ -1,13 +1,20 @@
 import { buildProxyUrl, PROXY_TYPES } from './corsProxy.js';
 
 export function getAllTags(cards) {
-    const tagsSet = new Set();
+    // Use Map to normalize tags (lowercase key -> original display value)
+    // First occurrence wins for display casing
+    const tagsMap = new Map();
     cards.forEach(card => {
         if (Array.isArray(card.tags)) {
-            card.tags.forEach(tag => tagsSet.add(tag));
+            card.tags.forEach(tag => {
+                const normalized = tag.toLowerCase().trim();
+                if (!tagsMap.has(normalized)) {
+                    tagsMap.set(normalized, tag.trim());
+                }
+            });
         }
     });
-    return Array.from(tagsSet).sort();
+    return Array.from(tagsMap.values()).sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase()));
 }
 
 // Get all unique creators from cards
@@ -75,9 +82,11 @@ export function filterCards(cards, filters, fuse, extensionName, extension_setti
 
     // Apply additional filters (tags, creator, and NSFW)
     filteredCards = filteredCards.filter(card => {
-        // Tag filter (must have ALL selected tags)
+        // Tag filter (must have ALL selected tags) - case-insensitive
         if (filters.tags.length > 0) {
-            if (!card.tags || !filters.tags.every(tag => card.tags.includes(tag))) {
+            if (!card.tags) return false;
+            const normalizedCardTags = card.tags.map(t => t.toLowerCase().trim());
+            if (!filters.tags.every(tag => normalizedCardTags.includes(tag.toLowerCase().trim()))) {
                 return false;
             }
         }
