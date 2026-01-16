@@ -72,7 +72,7 @@ function applyClientSideFilters(cards, state, extensionName, extension_settings)
     return cardsWithImages;
 }
 
-export function createCardBrowser(serviceName, cards, state, extensionName, extension_settings, showCardDetailFunc) {
+export async function createCardBrowser(serviceName, cards, state, extensionName, extension_settings, showCardDetailFunc) {
     state.view = 'browser';
     state.currentService = serviceName;
 
@@ -260,6 +260,47 @@ export function createCardBrowser(serviceName, cards, state, extensionName, exte
     state.filteredCards = cardsWithImages;
     state.currentPage = 1;
     state.totalPages = Math.ceil(cardsWithImages.length / (extension_settings[extensionName].cardsPerPage || 200));
+
+    // For live Chub API: if initial filtered cards are less than cardsPerPage, load more pages
+    // This fixes the issue where filtering removes most cards leaving only 1-5 visible initially
+    const cardsPerPage = extension_settings[extensionName].cardsPerPage || 200;
+    if (state.isLiveChub && state.filteredCards.length < cardsPerPage) {
+        const apiState = state.isLorebooks ? getChubLorebooksApiState() : getChubApiState();
+        const loadMoreFunc = state.isLorebooks ? loadMoreChubLorebooks : loadMoreChubCards;
+        let loadAttempts = 0;
+        const maxLoadAttempts = 10;
+
+        while (state.filteredCards.length < cardsPerPage && apiState.hasMore && !apiState.isLoading && loadAttempts < maxLoadAttempts) {
+            try {
+                loadAttempts++;
+                const newCards = await loadMoreFunc({
+                    search: state.filters.search,
+                    sort: state.sortBy,
+                    hideNsfw: extension_settings[extensionName].hideNsfw,
+                    ...(state.advancedFilters || {})
+                });
+
+                if (newCards.length > 0) {
+                    const existingIds = new Set(state.currentCards.map(c => c.id).filter(Boolean));
+                    const uniqueNewCards = newCards.filter(c => !c.id || !existingIds.has(c.id));
+                    state.currentCards.push(...uniqueNewCards);
+
+                    const filteredNewCards = applyClientSideFilters(uniqueNewCards, state, extensionName, extension_settings);
+                    state.filteredCards.push(...filteredNewCards);
+
+                    state.cachedTags = getAllTags(state.currentCards);
+                    state.cachedCreators = getAllCreators(state.currentCards);
+                } else {
+                    break;
+                }
+            } catch (error) {
+                console.error('[Bot Browser] Failed to load more cards during initial load:', error);
+                break;
+            }
+        }
+
+        state.totalPages = Math.ceil(state.filteredCards.length / cardsPerPage);
+    }
 
     const serviceDisplayName = serviceName === 'all' ? 'All Sources' :
         serviceName === 'anchorhold' ? '4chan - /aicg/' :
@@ -1458,6 +1499,34 @@ function setupCustomDropdown(container, state, filterType, extensionName, extens
                         state.filteredCards = sortCards(filteredCards, state.sortBy);
                         state.currentPage = 1; // Reset to page 1 on new sort
 
+                        // Load more cards if we don't have enough to fill the page
+                        const cardsPerPage = extension_settings[extensionName].cardsPerPage || 200;
+                        const apiState = state.isLorebooks ? getChubLorebooksApiState() : getChubApiState();
+                        const loadMoreFunc = state.isLorebooks ? loadMoreChubLorebooks : loadMoreChubCards;
+                        let loadAttempts = 0;
+                        const maxLoadAttempts = 10;
+
+                        while (state.filteredCards.length < cardsPerPage && apiState.hasMore && !apiState.isLoading && loadAttempts < maxLoadAttempts) {
+                            loadAttempts++;
+                            const newCards = await loadMoreFunc({
+                                search: state.filters.search,
+                                sort: state.sortBy,
+                                hideNsfw: extension_settings[extensionName].hideNsfw,
+                                ...(state.advancedFilters || {})
+                            });
+
+                            if (newCards.length > 0) {
+                                const existingIds = new Set(state.currentCards.map(c => c.id).filter(Boolean));
+                                const uniqueNewCards = newCards.filter(c => !c.id || !existingIds.has(c.id));
+                                state.currentCards.push(...uniqueNewCards);
+
+                                const filteredNewCards = applyClientSideFilters(uniqueNewCards, state, extensionName, extension_settings);
+                                state.filteredCards.push(...filteredNewCards);
+                            } else {
+                                break;
+                            }
+                        }
+
                         // Update tags/creators dropdowns with new data
                         updateCachedFiltersAndDropdowns(state, menuContent);
 
@@ -1796,23 +1865,23 @@ function setupChubPaginationListeners(gridContainer, state, menuContent, showCar
                 renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
             } else if (action === 'next') {
                 const nextPageStart = state.currentPage * cardsPerPage;
+                const nextPageEnd = (state.currentPage + 1) * cardsPerPage; // Need enough to FILL the next page
 
                 // Use appropriate state and loader based on whether this is lorebooks or cards
                 const apiState = state.isLorebooks ? getChubLorebooksApiState() : getChubApiState();
                 const loadMoreFunc = state.isLorebooks ? loadMoreChubLorebooks : loadMoreChubCards;
 
-                // Keep loading until we have enough filtered cards for the next page OR API runs out
+                // Keep loading until we have enough filtered cards to FILL the next page OR API runs out
                 let loadAttempts = 0;
                 const maxLoadAttempts = 10; // Prevent infinite loops
 
-                while (nextPageStart >= state.filteredCards.length && apiState.hasMore && !apiState.isLoading && loadAttempts < maxLoadAttempts) {
+                while (nextPageEnd > state.filteredCards.length && apiState.hasMore && !apiState.isLoading && loadAttempts < maxLoadAttempts) {
                     // Disable button and show loading
                     btn.disabled = true;
                     btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Loading...';
 
                     try {
                         loadAttempts++;
-                        console.log(`[Bot Browser] Loading more Chub cards (attempt ${loadAttempts}), need ${nextPageStart - state.filteredCards.length + 1} more filtered cards`);
 
                         const newItems = await loadMoreFunc({
                             search: state.filters.search,

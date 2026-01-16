@@ -327,7 +327,7 @@ async function showCardDetailWrapper(card, save = true, isRandom = false) {
                     const cards = nodes.map(transformChubCard);
 
                     if (cards.length > 0) {
-                        createCardBrowser(`Cards by ${creator}`, cards, state, extensionName, extension_settings, showCardDetailWrapper);
+                        await createCardBrowser(`Cards by ${creator}`, cards, state, extensionName, extension_settings, showCardDetailWrapper);
                         toastr.success(`Found ${cards.length} cards by ${escapeHTML(creator)}`);
                     } else {
                         toastr.info(`No cards found by ${escapeHTML(creator)}`);
@@ -348,7 +348,7 @@ async function showCardDetailWrapper(card, save = true, isRandom = false) {
                     const result = await fetchWyvernCreatorCards({ uid: card.creatorUid });
 
                     if (result.cards.length > 0) {
-                        createCardBrowser(`Cards by ${creator}`, result.cards, state, extensionName, extension_settings, showCardDetailWrapper);
+                        await createCardBrowser(`Cards by ${creator}`, result.cards, state, extensionName, extension_settings, showCardDetailWrapper);
                         toastr.success(`Found ${result.cards.length} cards by ${escapeHTML(creator)}`);
                     } else {
                         toastr.info(`No cards found by ${escapeHTML(creator)}`);
@@ -373,7 +373,7 @@ async function showCardDetailWrapper(card, save = true, isRandom = false) {
                     });
 
                     if (cards && cards.length > 0) {
-                        createCardBrowser(`Cards by ${creator}`, cards, state, extensionName, extension_settings, showCardDetailWrapper);
+                        await createCardBrowser(`Cards by ${creator}`, cards, state, extensionName, extension_settings, showCardDetailWrapper);
                         toastr.success(`Found ${cards.length} cards by ${escapeHTML(creator)}`);
                     } else {
                         toastr.info(`No cards found by ${escapeHTML(creator)}`);
@@ -405,7 +405,7 @@ async function showCardDetailWrapper(card, save = true, isRandom = false) {
 
                     if (cards.length > 0) {
                         state.isCreatorPage = true;
-                        createCardBrowser(`Cards by ${creator}`, cards, state, extensionName, extension_settings, showCardDetailWrapper);
+                        await createCardBrowser(`Cards by ${creator}`, cards, state, extensionName, extension_settings, showCardDetailWrapper);
                         toastr.success(`Found ${cards.length} cards by ${escapeHTML(creator)}`);
                     } else {
                         toastr.info(`No cards found by ${escapeHTML(creator)}`);
@@ -437,7 +437,7 @@ async function showCardDetailWrapper(card, save = true, isRandom = false) {
 
                     if (cards.length > 0) {
                         state.isCreatorPage = true;
-                        createCardBrowser(`Cards by ${creator}`, cards, state, extensionName, extension_settings, showCardDetailWrapper);
+                        await createCardBrowser(`Cards by ${creator}`, cards, state, extensionName, extension_settings, showCardDetailWrapper);
                         toastr.success(`Found ${cards.length} cards by ${escapeHTML(creator)}`);
                     } else {
                         toastr.info(`No cards found by ${escapeHTML(creator)}`);
@@ -539,7 +539,7 @@ function navigateBackToCollections() {
 }
 
 // Navigate back to sources view
-function navigateToSources() {
+async function navigateToSources() {
     // Check if we should go back to collections browser instead
     if (collectionsState.viewingCollectionCharacters) {
         navigateBackToCollections();
@@ -554,7 +554,7 @@ function navigateToSources() {
 
         // Restore the card browser with previous cards
         const serviceName = state.previousService || state.creatorPageSource || 'Cards';
-        createCardBrowser(serviceName, state.currentCards, state, extensionName, extension_settings, showCardDetailWrapper);
+        await createCardBrowser(serviceName, state.currentCards, state, extensionName, extension_settings, showCardDetailWrapper);
         return;
     }
 
@@ -842,7 +842,7 @@ function renderCollectionsPage(menuContent) {
                     currentPage: collectionsState.currentPage
                 };
 
-                createCardBrowser(`${collectionDetails.name}`, cards, state, extensionName, extension_settings, showCardDetailWrapper);
+                await createCardBrowser(`${collectionDetails.name}`, cards, state, extensionName, extension_settings, showCardDetailWrapper);
             } catch (error) {
                 console.error('[Bot Browser] Error loading collection:', error);
                 toastr.error('Failed to load collection: ' + error.message);
@@ -1107,7 +1107,7 @@ async function loadTrendingSource(sourceName, menu) {
         }
 
         // Use the standard card browser with trending cards
-        createCardBrowser(displayName, cards, state, extensionName, extension_settings, showCardDetailWrapper);
+        await createCardBrowser(displayName, cards, state, extensionName, extension_settings, showCardDetailWrapper);
 
     } catch (error) {
         console.error('[Bot Browser] Error loading trending:', error);
@@ -1552,7 +1552,7 @@ function setupSourceButtons(menu) {
                     cards = await loadServiceIndex(sourceName, useLive, loadOptions);
                 }
 
-                createCardBrowser(sourceName, cards, state, extensionName, extension_settings, showCardDetailWrapper);
+                await createCardBrowser(sourceName, cards, state, extensionName, extension_settings, showCardDetailWrapper);
             } catch (error) {
                 console.error('[Bot Browser] Error loading source:', error);
                 toastr.error(`Failed to load ${sourceName}`);
