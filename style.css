@@ -1139,6 +1139,154 @@ body .bot-browser-detail-modal {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
 }
 
+/* Multi-select mode styles */
+.bot-browser-multi-select-toggle {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: rgba(255, 255, 255, 0.7);
+    padding: 6px 10px;
+    border-radius: 6px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-left: auto;
+}
+
+.bot-browser-multi-select-toggle:hover {
+    background: rgba(100, 150, 255, 0.2);
+    border-color: rgba(100, 150, 255, 0.4);
+    color: #fff;
+}
+
+.bot-browser-multi-select-toggle.active {
+    background: linear-gradient(135deg, rgba(100, 150, 255, 0.3), rgba(120, 100, 255, 0.3));
+    border-color: rgba(100, 150, 255, 0.6);
+    color: #fff;
+}
+
+/* Card selection checkbox */
+.bot-browser-card-checkbox {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    width: 24px;
+    height: 24px;
+    background: rgba(0, 0, 0, 0.6);
+    border: 2px solid rgba(255, 255, 255, 0.5);
+    border-radius: 6px;
+    cursor: pointer;
+    z-index: 3;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.2s ease;
+}
+
+.bot-browser-card-checkbox i {
+    color: #fff;
+    font-size: 14px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.bot-browser-card-thumbnail.selected .bot-browser-card-checkbox {
+    background: linear-gradient(135deg, rgba(100, 200, 100, 0.9), rgba(60, 180, 60, 0.9));
+    border-color: rgba(100, 200, 100, 0.8);
+}
+
+.bot-browser-card-thumbnail.selected .bot-browser-card-checkbox i {
+    opacity: 1;
+}
+
+.bot-browser-card-thumbnail.selected {
+    border-color: rgba(100, 200, 100, 0.6);
+    box-shadow: 0 0 0 2px rgba(100, 200, 100, 0.3);
+}
+
+/* Show checkboxes in multi-select mode */
+.multi-select-mode .bot-browser-card-checkbox {
+    display: flex;
+}
+
+.multi-select-mode .bot-browser-card-thumbnail:hover .bot-browser-card-checkbox {
+    border-color: rgba(255, 255, 255, 0.8);
+}
+
+/* Bulk action bar */
+.bot-browser-bulk-action-bar {
+    position: fixed;
+    bottom: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: calc(100% - 40px);
+    max-width: 900px;
+    background: linear-gradient(135deg, rgba(30, 30, 40, 0.98), rgba(20, 20, 30, 0.98));
+    border: 1px solid rgba(100, 150, 255, 0.3);
+    border-bottom: none;
+    border-radius: 12px 12px 0 0;
+    padding: 12px 20px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    z-index: 5010;
+    backdrop-filter: blur(10px);
+    animation: bot-browser-slideUp 0.2s ease-out;
+    box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.4);
+}
+
+.bot-browser-bulk-selection-info {
+    font-size: 0.95em;
+    color: rgba(255, 255, 255, 0.8);
+}
+
+.bot-browser-selected-count {
+    font-weight: 600;
+    color: #fff;
+    background: linear-gradient(135deg, rgba(100, 150, 255, 0.3), rgba(120, 100, 255, 0.3));
+    padding: 2px 8px;
+    border-radius: 4px;
+    margin-right: 4px;
+}
+
+.bot-browser-bulk-actions {
+    display: flex;
+    gap: 10px;
+}
+
+.bot-browser-bulk-actions button {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    color: #fff;
+    padding: 8px 14px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9em;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.bot-browser-bulk-actions button:hover {
+    background: rgba(255, 255, 255, 0.15);
+    border-color: rgba(255, 255, 255, 0.4);
+}
+
+.bot-browser-bulk-import-btn {
+    background: linear-gradient(135deg, rgba(100, 200, 100, 0.3), rgba(60, 180, 60, 0.3)) !important;
+    border-color: rgba(100, 200, 100, 0.5) !important;
+}
+
+.bot-browser-bulk-import-btn:hover {
+    background: linear-gradient(135deg, rgba(100, 200, 100, 0.5), rgba(60, 180, 60, 0.5)) !important;
+    border-color: rgba(100, 200, 100, 0.7) !important;
+}
+
+.bot-browser-bulk-import-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
 .bot-browser-own-badge {
     position: absolute;
     top: 8px;
@@ -1342,6 +1490,34 @@ body .bot-browser-detail-modal {
     border-color: rgba(255, 100, 100, 0.6);
     transform: scale(1.05);
     box-shadow: 0 4px 12px rgba(255, 80, 80, 0.3);
+}
+
+/* Header actions container */
+.bot-browser-detail-header-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* View on Website button */
+.bot-browser-view-source-btn {
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: #fff;
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 1.2em;
+    transition: all 0.2s ease;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
+}
+
+.bot-browser-view-source-btn:hover {
+    background: linear-gradient(135deg, rgba(100, 150, 255, 0.25), rgba(120, 100, 255, 0.25));
+    border-color: rgba(100, 150, 255, 0.5);
+    color: #fff;
+    transform: scale(1.05);
+    box-shadow: 0 4px 12px rgba(100, 150, 255, 0.3);
 }
 
 .bot-browser-detail-content {

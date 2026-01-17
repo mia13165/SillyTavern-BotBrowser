@@ -1,6 +1,6 @@
 import { Fuse } from '../../../../../lib.js';
 import { debounce, escapeHTML } from './utils/utils.js';
-import { createBrowserHeader, createCardGrid, createCardHTML, createBottomActions } from './templates/templates.js';
+import { createBrowserHeader, createCardGrid, createCardHTML, createBottomActions, createBulkActionBar } from './templates/templates.js';
 import { getAllTags, getAllCreators, filterCards, sortCards, deduplicateCards, validateCardImages } from './services/cards.js';
 import { loadPersistentSearch, savePersistentSearch, loadSearchCollapsed, saveSearchCollapsed } from './storage/storage.js';
 import { loadMoreChubCards, loadMoreChubLorebooks, getChubApiState, getChubLorebooksApiState, resetChubApiState, loadServiceIndex, getCharacterTavernApiState, resetCharacterTavernState, loadMoreCharacterTavernCards, getWyvernApiState, getWyvernLorebooksApiState, resetWyvernApiState, resetWyvernLorebooksApiState, loadMoreWyvernCards, loadMoreWyvernLorebooksWrapper } from './services/cache.js';
@@ -293,6 +293,10 @@ export async function createCardBrowser(serviceName, cards, state, extensionName
         state.fuse = null;
     }
 
+    // Initialize multi-select state
+    state.isMultiSelectMode = false;
+    state.selectedCards = new Set();
+
     const menu = document.getElementById('bot-browser-menu');
     if (!menu) return;
 
@@ -360,6 +364,12 @@ export async function createCardBrowser(serviceName, cards, state, extensionName
                         ? `Browsing Wyvern Chat${nsfwText}`
                         : `${cardsWithImages.length} card${cardsWithImages.length !== 1 ? 's' : ''} found${nsfwText}`;
     menuContent.innerHTML = createBrowserHeader(serviceDisplayName, state.filters.search, cardCountText, searchCollapsed, hideNsfw, state.isLiveChub, state.advancedFilters, state.isJannyAI, state.jannyAdvancedFilters, state.isCharacterTavern, state.ctAdvancedFilters, state.isWyvern, state.wyvernAdvancedFilters, state.isRisuRealm);
+
+    // Add bulk action bar to the grid wrapper
+    const gridWrapper = menuContent.querySelector('.bot-browser-card-grid-wrapper');
+    if (gridWrapper) {
+        gridWrapper.insertAdjacentHTML('beforeend', createBulkActionBar());
+    }
 
     // Render first page immediately for better perceived performance
     renderPage(state, menuContent, showCardDetailFunc, extensionName, extension_settings);
@@ -562,6 +572,41 @@ function setupBrowserEventListeners(menuContent, state, extensionName, extension
         // closeBotBrowserMenu will be called from main index.js
         window.dispatchEvent(new CustomEvent('bot-browser-close'));
     });
+
+    // Multi-select toggle button
+    const multiSelectToggle = menuContent.querySelector('.bot-browser-multi-select-toggle');
+    if (multiSelectToggle) {
+        multiSelectToggle.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            state.isMultiSelectMode = !state.isMultiSelectMode;
+            multiSelectToggle.classList.toggle('active', state.isMultiSelectMode);
+
+            // Toggle multi-select mode class on grid wrapper
+            const gridWrapper = menuContent.querySelector('.bot-browser-card-grid-wrapper');
+            if (gridWrapper) {
+                gridWrapper.classList.toggle('multi-select-mode', state.isMultiSelectMode);
+            }
+
+            // Show/hide bulk action bar
+            const bulkActionBar = menuContent.querySelector('.bot-browser-bulk-action-bar');
+            if (bulkActionBar) {
+                bulkActionBar.style.display = state.isMultiSelectMode ? 'flex' : 'none';
+            }
+
+            // Clear selections when exiting multi-select mode
+            if (!state.isMultiSelectMode) {
+                state.selectedCards.clear();
+                menuContent.querySelectorAll('.bot-browser-card-thumbnail.selected').forEach(card => {
+                    card.classList.remove('selected');
+                });
+                updateBulkActionBar(menuContent, state);
+            }
+        });
+    }
+
+    // Bulk action bar event listeners
+    setupBulkActionListeners(menuContent, state, extensionName, extension_settings);
 
     // Global click listener for closing dropdowns
     const closeDropdowns = (e) => {
@@ -1790,10 +1835,23 @@ function renderPage(state, menuContent, showCardDetailFunc, extensionName, exten
 
     // Attach card click listeners
     gridContainer.querySelectorAll('.bot-browser-card-thumbnail').forEach(cardEl => {
+        // Restore selected state if card was previously selected
+        const cardId = cardEl.dataset.cardId;
+        if (state.selectedCards && state.selectedCards.has(cardId)) {
+            cardEl.classList.add('selected');
+        }
+
         cardEl.addEventListener('click', async (e) => {
             e.stopPropagation();
             e.preventDefault();
-            const cardId = cardEl.dataset.cardId;
+
+            // In multi-select mode, any click on the card toggles selection
+            if (state.isMultiSelectMode) {
+                handleCardCheckboxClick(cardEl, state, menuContent);
+                return;
+            }
+
+            // Normal mode - open detail modal
             const card = state.currentCards.find(c => c.id === cardId);
             if (card) {
                 await showCardDetailFunc(card);
@@ -2724,4 +2782,117 @@ function updateFilterUI(menuContent, state) {
             }
         });
     }
+}
+
+// ========== BULK SELECT / MULTI-SELECT FUNCTIONS ==========
+
+/**
+ * Update the bulk action bar UI based on current selection
+ */
+function updateBulkActionBar(menuContent, state) {
+    const countSpan = menuContent.querySelector('.bot-browser-selected-count');
+    const importBtn = menuContent.querySelector('.bot-browser-bulk-import-btn');
+
+    if (countSpan) {
+        countSpan.textContent = state.selectedCards.size;
+    }
+
+    if (importBtn) {
+        importBtn.disabled = state.selectedCards.size === 0;
+    }
+}
+
+/**
+ * Setup event listeners for bulk action bar buttons
+ */
+function setupBulkActionListeners(menuContent, state, extensionName, extension_settings) {
+    // Select All button
+    const selectAllBtn = menuContent.querySelector('.bot-browser-select-all-btn');
+    if (selectAllBtn) {
+        selectAllBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+
+            // Select all visible cards on the current page
+            const gridContainer = menuContent.querySelector('.bot-browser-card-grid');
+            if (gridContainer) {
+                gridContainer.querySelectorAll('.bot-browser-card-thumbnail').forEach(cardEl => {
+                    const cardId = cardEl.dataset.cardId;
+                    if (cardId) {
+                        state.selectedCards.add(cardId);
+                        cardEl.classList.add('selected');
+                    }
+                });
+            }
+
+            updateBulkActionBar(menuContent, state);
+        });
+    }
+
+    // Deselect All button
+    const deselectAllBtn = menuContent.querySelector('.bot-browser-deselect-all-btn');
+    if (deselectAllBtn) {
+        deselectAllBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+
+            state.selectedCards.clear();
+            menuContent.querySelectorAll('.bot-browser-card-thumbnail.selected').forEach(card => {
+                card.classList.remove('selected');
+            });
+
+            updateBulkActionBar(menuContent, state);
+        });
+    }
+
+    // Bulk Import button
+    const bulkImportBtn = menuContent.querySelector('.bot-browser-bulk-import-btn');
+    if (bulkImportBtn) {
+        bulkImportBtn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+
+            if (state.selectedCards.size === 0) {
+                toastr.warning('No cards selected');
+                return;
+            }
+
+            // Get the selected cards data
+            const selectedCardData = state.currentCards.filter(card =>
+                state.selectedCards.has(card.id)
+            );
+
+            if (selectedCardData.length === 0) {
+                toastr.warning('Could not find selected cards');
+                return;
+            }
+
+            // Dispatch event to trigger bulk import in index.js
+            window.dispatchEvent(new CustomEvent('bot-browser-bulk-import', {
+                detail: {
+                    cards: selectedCardData,
+                    extensionName,
+                    extension_settings
+                }
+            }));
+        });
+    }
+}
+
+/**
+ * Handle card checkbox click for multi-select
+ */
+export function handleCardCheckboxClick(cardEl, state, menuContent) {
+    const cardId = cardEl.dataset.cardId;
+    if (!cardId) return;
+
+    if (state.selectedCards.has(cardId)) {
+        state.selectedCards.delete(cardId);
+        cardEl.classList.remove('selected');
+    } else {
+        state.selectedCards.add(cardId);
+        cardEl.classList.add('selected');
+    }
+
+    updateBulkActionBar(menuContent, state);
 }

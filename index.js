@@ -38,7 +38,7 @@ import { fetchWyvernCreatorCards } from './modules/services/wyvernApi.js';
 import { searchCharacterTavern } from './modules/services/characterTavernApi.js';
 
 // Extension version (from manifest.json)
-const EXTENSION_VERSION = '1.1.3';
+const EXTENSION_VERSION = '1.1.4';
 
 // Extension name and settings
 const extensionName = 'BotBrowser';
@@ -2535,6 +2535,66 @@ function addBotButton() {
 // Listen for navigation events from browser.js
 window.addEventListener('bot-browser-navigate-sources', navigateToSources);
 window.addEventListener('bot-browser-close', closeBotBrowserMenu);
+
+// Listen for bulk import event
+window.addEventListener('bot-browser-bulk-import', async (e) => {
+    const { cards, extensionName: extName, extension_settings: extSettings } = e.detail;
+
+    if (!cards || cards.length === 0) {
+        toastr.warning('No cards to import');
+        return;
+    }
+
+    const totalCards = cards.length;
+    let successCount = 0;
+    let failCount = 0;
+
+    toastr.info(`Starting bulk import of ${totalCards} cards...`, 'Bulk Import', { timeOut: 3000 });
+
+    for (let i = 0; i < cards.length; i++) {
+        const card = cards[i];
+        try {
+            toastr.info(`Importing ${i + 1}/${totalCards}: ${card.name}`, 'Bulk Import', { timeOut: 1500 });
+
+            await importCardToSillyTavern(
+                card,
+                extName,
+                extSettings,
+                importStats,
+                getRequestHeaders,
+                processDroppedFiles
+            );
+
+            successCount++;
+        } catch (error) {
+            console.error(`[Bot Browser] Failed to import ${card.name}:`, error);
+            failCount++;
+        }
+
+        // Small delay between imports to avoid overwhelming the server
+        if (i < cards.length - 1) {
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+    }
+
+    // Show final summary
+    if (failCount === 0) {
+        toastr.success(`Successfully imported ${successCount} cards!`, 'Bulk Import Complete');
+    } else {
+        toastr.warning(`Imported ${successCount} of ${totalCards} cards. ${failCount} failed.`, 'Bulk Import Complete');
+    }
+
+    // Clear selection after import
+    state.selectedCards?.clear();
+    const menuContent = document.querySelector('.bot-browser-content');
+    if (menuContent) {
+        menuContent.querySelectorAll('.bot-browser-card-thumbnail.selected').forEach(card => {
+            card.classList.remove('selected');
+        });
+        const countSpan = menuContent.querySelector('.bot-browser-selected-count');
+        if (countSpan) countSpan.textContent = '0';
+    }
+});
 
 // Initialize extension
 jQuery(async () => {

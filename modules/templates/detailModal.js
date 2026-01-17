@@ -1,6 +1,6 @@
 import { sanitizeImageUrl } from '../utils/utils.js';
 
-export function buildDetailModalHTML(cardName, imageUrl, isLorebook, cardCreator, tags, creator, websiteDesc, description, descPreview, personality, scenario, firstMessage, alternateGreetings, exampleMsg, entries, entriesCount, metadata, isBookmarked = false, isRandom = false, isImported = false, characterExistsInST = false) {
+export function buildDetailModalHTML(cardName, imageUrl, isLorebook, cardCreator, tags, creator, websiteDesc, description, descPreview, personality, scenario, firstMessage, alternateGreetings, exampleMsg, entries, entriesCount, metadata, isBookmarked = false, isRandom = false, isImported = false, characterExistsInST = false, sourceUrlData = null) {
     const safeImageUrl = sanitizeImageUrl(imageUrl);
 
     // Random buttons HTML (only shown when viewing a random card)
@@ -22,12 +22,21 @@ export function buildDetailModalHTML(cardName, imageUrl, isLorebook, cardCreator
                     </button>
                 </div>` : '';
 
+    // View on Website button (only for live API sources)
+    const viewOnWebsiteHTML = sourceUrlData ? `
+                <button class="bot-browser-view-source-btn" data-url="${sourceUrlData.url}" title="View on ${sourceUrlData.serviceName}">
+                    <i class="fa-solid fa-external-link"></i>
+                </button>` : '';
+
     return `
         <div class="bot-browser-detail-header">
             <h2>${cardName}</h2>
-            <button class="bot-browser-detail-close">
-                <i class="fa-solid fa-times"></i>
-            </button>
+            <div class="bot-browser-detail-header-actions">
+                ${viewOnWebsiteHTML}
+                <button class="bot-browser-detail-close">
+                    <i class="fa-solid fa-times"></i>
+                </button>
+            </div>
         </div>
 
         <div class="bot-browser-detail-content">

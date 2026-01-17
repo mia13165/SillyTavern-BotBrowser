@@ -19,6 +19,9 @@ export function createCardHTML(card) {
 
     return `
         <div class="bot-browser-card-thumbnail" data-card-id="${card.id}" data-nsfw="${isNsfw}">
+            <div class="bot-browser-card-checkbox" title="Select card">
+                <i class="fa-solid fa-check"></i>
+            </div>
             ${card.is_own ? '<div class="bot-browser-own-badge" title="Your character"><i class="fa-solid fa-user"></i></div>' : ''}
             <div class="bot-browser-card-image" style="background-image: url('${safeImageUrl}');">
                 ${!safeImageUrl ? '<i class="fa-solid fa-user"></i>' : ''}
@@ -41,7 +44,7 @@ export function createCardHTML(card) {
 export function getOriginalMenuHTML(recentlyViewed) {
     return `
         <div class="bot-browser-header">
-            <h3>Bot Browser <span style="font-size: 0.6em; font-weight: 400; color: rgba(255, 255, 255, 0.6);">v1.1.3</span></h3>
+            <h3>Bot Browser <span style="font-size: 0.6em; font-weight: 400; color: rgba(255, 255, 255, 0.6);">v1.1.4</span></h3>
             <div class="bot-browser-tabs">
                 <button class="bot-browser-tab active" data-tab="bots">Bots</button>
                 <button class="bot-browser-tab" data-tab="lorebooks">Lorebooks</button>
@@ -242,6 +245,9 @@ export function createBrowserHeader(serviceDisplayName, searchValue, cardCountTe
             </button>
             <h3>${serviceDisplayName}</h3>
             ${hideNsfw ? '<div class="bot-browser-nsfw-indicator" title="NSFW cards are hidden (change in settings)"><i class="fa-solid fa-eye-slash"></i> NSFW Hidden</div>' : ''}
+            <button class="bot-browser-multi-select-toggle" title="Toggle Multi-Select Mode">
+                <i class="fa-solid fa-check-double"></i>
+            </button>
             <button class="bot-browser-toggle-search" title="Toggle Search">
                 <i class="fa-solid fa-chevron-${searchCollapsed ? 'down' : 'up'}"></i>
             </button>
@@ -625,5 +631,27 @@ export function createBottomActions() {
         <button class="bot-browser-settings" title="Settings">
             <i class="fa-solid fa-gear"></i>
         </button>
+    `;
+}
+
+// Create bulk action bar HTML (shown when multi-select mode is active)
+export function createBulkActionBar() {
+    return `
+        <div class="bot-browser-bulk-action-bar" style="display: none;">
+            <div class="bot-browser-bulk-selection-info">
+                <span class="bot-browser-selected-count">0</span> selected
+            </div>
+            <div class="bot-browser-bulk-actions">
+                <button class="bot-browser-select-all-btn" title="Select All on Page">
+                    <i class="fa-solid fa-check-square"></i> Select All
+                </button>
+                <button class="bot-browser-deselect-all-btn" title="Deselect All">
+                    <i class="fa-regular fa-square"></i> Deselect
+                </button>
+                <button class="bot-browser-bulk-import-btn" title="Import Selected Cards">
+                    <i class="fa-solid fa-download"></i> Import Selected
+                </button>
+            </div>
+        </div>
     `;
 }

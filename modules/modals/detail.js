@@ -8,6 +8,7 @@ import { fetchRisuRealmCharacter, transformFullRisuRealmCharacter } from '../ser
 import { getBackyardCharacter, transformFullBackyardCharacter } from '../services/backyardApi.js';
 import { getPygmalionCharacter, transformFullPygmalionCharacter } from '../services/pygmalionApi.js';
 import { buildProxyUrl, PROXY_TYPES } from '../services/corsProxy.js';
+import { getSourceUrl } from '../utils/utils.js';
 import { characters, selectCharacterById } from '../../../../../../script.js';
 
 let isOpeningModal = false;
@@ -286,6 +287,9 @@ function createDetailModal(fullCard, isRandom = false) {
     const stCharacter = findCharacterByName(fullCard.name);
     const characterExistsInST = stCharacter !== null;
 
+    // Get source website URL for live API cards
+    const sourceUrlData = getSourceUrl(fullCard);
+
     // Store character index for later use
     if (characterExistsInST) {
         detailModal.dataset.stCharacterIndex = stCharacter.index;
@@ -312,7 +316,8 @@ function createDetailModal(fullCard, isRandom = false) {
         cardIsBookmarked,
         isRandom,
         isImported,
-        characterExistsInST
+        characterExistsInST,
+        sourceUrlData
     );
 
     return { detailOverlay, detailModal };
@@ -405,6 +410,19 @@ function setupDetailModalEvents(detailModal, detailOverlay, fullCard, state) {
                 bookmarkBtn.querySelector('i').className = 'fa-solid fa-bookmark';
                 bookmarkBtn.querySelector('span').textContent = 'Bookmarked';
                 toastr.success('Added to bookmarks', '', { timeOut: 2000 });
+            }
+        });
+    }
+
+    // View on Website button - opens source page in new tab
+    const viewSourceBtn = detailModal.querySelector('.bot-browser-view-source-btn');
+    if (viewSourceBtn) {
+        viewSourceBtn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            e.preventDefault();
+            const url = viewSourceBtn.dataset.url;
+            if (url) {
+                window.open(url, '_blank', 'noopener,noreferrer');
             }
         });
     }
